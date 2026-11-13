@@ -1,0 +1,61 @@
+# Test fixture, not a shipped preset: a made-up land sale agreement rendered by tests/synth.py as
+# typeset text. Words are hyphenated at line ends (inside labels, end texts and values), several
+# values end only at a comma or a full stop, and amounts and dates are written in words. As in
+# synth_agreement.yaml, `label` is the text printed just before the value and `until` the text
+# printed just after it; a real agreement needs its own file written from its wording.
+name: synth_contract
+title: Synthetic typeset land sale agreement
+description: Made-up typeset prose used to test hyphenated line breaks, punctuation end texts and numbers in words.
+fields:
+  - name: agreement_date
+    label: made on the
+    aliases: ["dated the"]
+    until: ["and is made between", "between"]
+    type: date
+  - name: vendor_name
+    label: between
+    until: ","
+    type: name
+  - name: purchaser_name
+    label: of the one part and
+    aliases: ["(the Vendor) and"]
+    until: ","
+    type: name
+  - name: land_location
+    label: land situated at
+    until: "."
+  - name: registered_owner
+    label: registered in the name of
+    until: "."
+    type: name
+  - name: purchase_price
+    label: purchase price is Kenya Shillings
+    aliases: ["the sum of Kenya Shillings"]
+    until: "(KES"
+    type: integer
+  - name: price_in_figures
+    label: "(KES"
+    until: ")"
+    type: integer
+  - name: deposit
+    label: a deposit of
+    until: ","
+    type: integer
+  - name: completion_date
+    label: on or before the
+    until: "by bank transfer"
+    type: date
+  - name: occupation
+    label: by profession a
+    aliases: ["by profession an"]
+    until: ","
+  - name: land_use
+    label: use the land for
+    until: "purposes only"
+  - name: notice_address
+    label: shall be sent to
+    until: "."
+  - name: witness_name
+    label: in the presence of
+    until: ","
+    type: name

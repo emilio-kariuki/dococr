@@ -1,0 +1,46 @@
+# Test fixture, not a shipped preset: a made-up land sale agreement rendered by tests/synth.py as
+# typeset text in which the space between a label or end text and the neighbouring word is
+# left out on some pages ("Title NumberNAKURU/BLOCK 7", "Box4410-00506", "Thepurchase"), as OCR
+# often loses it. As in synth_agreement.yaml, `label` is the text printed just before the value
+# and `until` the text printed just after it; a real agreement needs its own file.
+name: synth_glued
+title: Synthetic land sale agreement with lost spaces
+description: Made-up typeset prose used to test labels and end texts glued to the next word.
+fields:
+  - name: agreement_date
+    label: is made on the
+    until: BETWEEN
+    type: date
+  - name: vendor_name
+    label: BETWEEN
+    until: of Post Office Box
+    type: name
+  - name: purchaser_name
+    label: (the Vendor) and
+    until: ","
+    type: name
+  - name: parcel_number
+    label: known as Title Number
+    until: situated in
+  - name: county
+    label: situated in
+    until: "."
+  - name: purchase_price
+    label: purchase price shall be Kenya Shillings
+    until: "("
+    type: integer
+  - name: price_in_figures
+    label: (KES
+    until: ")"
+    type: integer
+  - name: deposit
+    label: deposit of Kenya Shillings
+    until: only
+    type: integer
+  - name: completion_date
+    label: completion date shall be the
+    until: "."
+    type: date
+  - name: advocate
+    label: acting through the firm of
+    until: "."

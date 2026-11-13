@@ -1,0 +1,41 @@
+# Test fixture, not a shipped preset: a made-up form rendered by tests/synth.py, with a wrapped
+# name and a postal address block over two or three lines next to single-line fields.
+name: synth_form
+title: Synthetic membership form
+description: Made-up form used to test values that run over several lines.
+fields:
+  - name: member_number
+    label: Member No
+    aliases: ["Membership No"]
+    type: identifier
+    pattern: 'M\d{6}'
+  - name: full_name
+    label: Full Name
+    aliases: ["Name of Applicant"]
+    type: name
+    multiline: true
+  - name: id_number
+    label: ID Number
+    aliases: ["ID No"]
+    type: identifier
+    pattern: '\d{8}'
+  - name: date_of_birth
+    label: Date of Birth
+    type: date
+  - name: postal_address
+    label: Postal Address
+    aliases: ["Address"]
+    multiline: true
+  - name: phone_number
+    label: Telephone
+    aliases: ["Phone No"]
+    type: identifier
+    pattern: '07\d{8}'
+  - name: occupation
+    label: Occupation
+  - name: county
+    label: County
+  - name: next_of_kin
+    label: Next of Kin
+    type: name
+    multiline: true

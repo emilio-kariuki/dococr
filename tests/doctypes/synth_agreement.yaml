@@ -1,0 +1,60 @@
+# Test fixture, not a shipped preset: a made-up sale agreement rendered by tests/synth.py.
+# Every value sits inside a sentence. `label` is the text printed just before the value and
+# `until` the text printed just after it; the aliases and `until` lists cover the wordings that
+# tests/synth.py varies by seed. A real agreement needs its own file written from its wording.
+name: synth_agreement
+title: Synthetic sale agreement
+description: Made-up prose document used to test values inside running text.
+# Text that no value runs through. "of the other part" ends the parties' paragraph; without it,
+# the "of" there followed by "the Vendor" in the next sentence is a second reading of
+# vendor_address, and that field comes back missing as ambiguous.
+other_labels: ["the other part"]
+fields:
+  - name: agreement_date
+    label: made on the
+    aliases: ["dated this"]
+    until: ["and is made between", "between"]
+    type: date
+  - name: vendor_name
+    label: between
+    until: "of"
+    type: name
+  - name: vendor_address
+    label: "of"
+    until: ["(hereinafter called the Vendor)", "(hereinafter called the Seller)",
+            "(hereinafter referred to as the Vendor)", "(hereinafter referred to as the Seller)",
+            "(the Vendor)", "(the Seller)"]
+  - name: purchaser_name
+    label: of the one part and
+    aliases: ["the Vendor) and", "the Seller) and"]
+    until: "of"
+    type: name
+  - name: purchaser_address
+    label: "of"
+    until: ["(hereinafter called the Purchaser)", "(hereinafter called the Buyer)",
+            "(hereinafter referred to as the Purchaser)", "(hereinafter referred to as the Buyer)",
+            "(the Purchaser)", "(the Buyer)"]
+  - name: registration_number
+    label: registration number
+    until: "chassis number"
+    type: identifier
+    pattern: 'K[A-Z]{2}\s?\d{3}\s?[A-Z]?'
+  - name: chassis_number
+    label: chassis number
+    until: ["and has agreed", "for the sum of"]
+    type: identifier
+  - name: price_in_words
+    label: Kenya Shillings
+    until: "(KES"
+  - name: purchase_price
+    label: "(KES"
+    until: ["payable", "to be paid"]
+    type: integer
+  - name: completion_date
+    label: on or before the
+    until: "by bank transfer"
+    type: date
+  - name: witness_name
+    label: in the presence of
+    until: "Advocate"
+    type: name
