@@ -1,0 +1,84 @@
+name: logbook
+title: Vehicle logbook
+description: Vehicle registration certificate (logbook) listing the vehicle's particulars and registered owner.
+aliases: ["log book", "vehicle logbook", "vehicle registration"]
+# Printed on the logbook but not extracted here; they only mark where a neighbouring value ends.
+other_labels: ["Tax Class", "Axles", "Load Capacity", "Customs Entry No", "Duty",
+               "Previous Owner", "Postal Address", "Address", "ID No", "ID Number"]
+fields:
+  - name: registration_number
+    label: Registration No
+    aliases: ["Reg No", "Registration Number", "Number Plate", "Reg Number", "Registration Mark",
+              "Vehicle Registration No", "Vehicle Registration Number"]
+    type: identifier
+    pattern: 'K[A-Z]{2}\s?\d{3}\s?[A-Z]?'
+    description: Number plate, e.g. KDA 123A.
+  - name: chassis_number
+    label: Chassis No
+    aliases: ["Chassis/Frame", "Frame No", "VIN", "Chassis Number", "Chassis/Frame No",
+              "Frame Number", "VIN No", "Chassis/Frame Number"]
+    type: identifier
+  - name: engine_number
+    label: Engine No
+    aliases: ["Engine Number", "Engine Serial No", "Engine Serial Number"]
+    type: identifier
+  - name: make
+    label: Make
+    aliases: ["Vehicle Make"]
+  - name: model
+    label: Model
+    aliases: ["Vehicle Model"]
+  - name: body_type
+    label: Body
+    aliases: ["Body Type", "Type", "Type of Body"]
+  - name: colour
+    label: Colour
+    aliases: ["Color", "Body Colour", "Body Color"]
+  - name: fuel
+    label: Fuel
+    aliases: ["Fuel Type", "Type of Fuel"]
+  - name: year_of_manufacture
+    label: Year of Manufacture
+    aliases: ["Man Year", "Year", "Year of Mfg", "Manufacture Year", "Year of Make", "YOM"]
+    type: integer
+    pattern: '(19|20)\d{2}'
+  - name: engine_capacity
+    label: Rating
+    aliases: ["Engine Capacity", "CC", "Engine Rating", "Rating (CC)", "Capacity"]
+    type: integer
+  - name: passengers
+    label: Passengers
+    aliases: ["Seating Capacity", "No of Passengers", "Number of Passengers", "Seats", "Seating"]
+    type: integer
+  - name: tare_weight
+    label: Tare Weight
+    aliases: ["Tare", "Tare Wt"]
+    type: integer
+  - name: gross_weight
+    label: Gross Weight
+    aliases: ["Gross Vehicle Weight", "Gross Wt"]
+    type: integer
+  - name: owner_name
+    label: Registered Owner
+    aliases: ["Owner", "Name of Owner", "Owner Name", "Owner's Name", "Owner(s)"]
+    type: name
+  - name: owner_pin
+    label: PIN
+    aliases: ["Owner PIN", "Tax PIN", "KRA PIN", "PIN No", "PIN Number", "Owner's PIN"]
+    type: identifier
+    pattern: '[AP]\d{9}[A-Z]'
+    description: Owner's tax PIN, e.g. A012345678Z.
+  - name: date_of_registration
+    label: Date of Registration
+    aliases: ["Registration Date", "Date of Reg", "Reg Date", "Date of First Registration",
+              "Date Registered"]
+    type: date
+  - name: logbook_number
+    label: Logbook Number
+    aliases: ["Serial No", "Serial Number", "Entry No", "Entry Number", "Logbook No",
+              "Log Book No", "Log Book Number", "Logbook Serial No", "Logbook Serial Number"]
+    type: identifier
+  - name: previous_registration
+    label: Previous Registration
+    aliases: ["Previous Reg No", "Previous Reg Number", "Prev Reg"]
+    type: identifier

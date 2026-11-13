@@ -1,0 +1,45 @@
+name: passport
+title: Passport
+description: Passport biographical data page.
+# Printed on the data page but not extracted here; they only mark where a neighbouring value ends.
+other_labels: ["Type", "Personal No", "ID No", "Signature", "Holder's Signature"]
+fields:
+  - name: passport_number
+    label: Passport No
+    aliases: ["Passport Number", "Document No", "Document Number", "Passport No."]
+    type: identifier
+    pattern: '[A-Z]{1,2}\d{6,8}'
+  - name: surname
+    label: Surname
+    aliases: ["Last Name"]
+    type: name
+  - name: given_names
+    label: Given Names
+    aliases: ["Given Name", "First Names", "Forenames"]
+    type: name
+  - name: nationality
+    label: Nationality
+  - name: date_of_birth
+    label: Date of Birth
+    aliases: ["DOB", "Birth Date"]
+    type: date
+  - name: sex
+    label: Sex
+    pattern: 'M|F|X'
+  - name: place_of_birth
+    label: Place of Birth
+    aliases: ["Birth Place"]
+  - name: date_of_issue
+    label: Date of Issue
+    aliases: ["Issue Date"]
+    type: date
+  - name: date_of_expiry
+    label: Date of Expiry
+    aliases: ["Expiry Date", "Date of Exp"]
+    type: date
+  - name: country_code
+    label: Country Code
+    aliases: ["Code"]
+  - name: issuing_authority
+    label: Authority
+    aliases: ["Issuing Authority"]

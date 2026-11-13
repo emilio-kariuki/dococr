@@ -1,0 +1,58 @@
+name: driving_license
+title: Driving licence
+description: Driving licence card or booklet.
+aliases: ["driving licence", "drivers license", "driver license", "DL"]
+# Printed on the licence but not extracted here; they only mark where a neighbouring value ends.
+other_labels: ["Nationality", "Place of Issue", "Issuing Authority",
+               "Address", "Postal Address", "Signature", "Holder's Signature", "Restrictions",
+               "Endorsements", "Conditions"]
+fields:
+  - name: license_number
+    label: Licence No
+    aliases: ["License No", "Licence Number", "License Number", "DL No", "DL Number",
+              "Driving Licence No", "Driving License No", "Driving Licence Number",
+              "Driving License Number", "Driver's Licence No", "Driver's License No",
+              "Driver's Licence Number", "Driver's License Number", "Lic No"]
+    type: identifier
+    description: The licence's own number (not the holder's national ID number).
+  - name: surname
+    label: Surname
+    aliases: ["Last Name", "Family Name"]
+    type: name
+  - name: other_names
+    label: Other Names
+    aliases: ["Given Names", "First Names", "First Name", "Forenames"]
+    type: name
+  - name: national_id_number
+    label: National ID No
+    aliases: ["ID No", "National ID", "ID Number", "National ID Number", "Identity No",
+              "Identity Number"]
+    type: identifier
+    pattern: '\d{6,10}'
+  - name: date_of_birth
+    label: Date of Birth
+    aliases: ["DOB", "D.O.B", "Birth Date"]
+    type: date
+  - name: sex
+    label: Sex
+    aliases: ["Gender"]
+    pattern: 'M|F|MALE|FEMALE'
+  - name: blood_group
+    label: Blood Group
+    aliases: ["Blood Type"]
+    pattern: '(A|B|AB|O)\s?[+-]?(VE)?'
+  - name: date_of_issue
+    label: Date of Issue
+    aliases: ["Issue Date", "Issued On", "Date Issued"]
+    type: date
+  - name: date_of_expiry
+    label: Date of Expiry
+    aliases: ["Expiry Date", "Valid Until", "Expires", "Date of Exp", "Valid To"]
+    type: date
+  - name: vehicle_classes
+    label: Classes
+    aliases: ["Class", "Categories", "Vehicle Category", "Vehicle Categories", "Licence Class",
+              "License Class"]
+  - name: country
+    label: Country of Residence
+    aliases: ["Country"]

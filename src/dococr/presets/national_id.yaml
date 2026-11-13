@@ -1,0 +1,46 @@
+name: national_id
+title: National ID card
+description: Government-issued national identity card (front and/or back).
+aliases: ["id", "id card", "identity card"]
+# Printed on the card but not extracted here; they only mark where a neighbouring value ends.
+other_labels: ["Holder's Sign", "Holder's Signature", "Signature", "District", "Division",
+               "Location", "Sub-Location"]
+fields:
+  - name: id_number
+    label: ID Number
+    aliases: ["ID NO", "Identity Number", "Identity No", "National ID Number", "National ID No",
+              "Identity Card No", "Identity Card Number", "ID Card No", "ID Card Number", "NIN"]
+    type: identifier
+    pattern: '\d{6,10}'
+  - name: serial_number
+    label: Serial Number
+    aliases: ["Serial No", "Card Serial No", "Card Serial Number"]
+    type: identifier
+  - name: full_name
+    label: Full Names
+    aliases: ["Name", "Names", "Full Name"]
+    type: name
+  - name: date_of_birth
+    label: Date of Birth
+    aliases: ["DOB", "D.O.B", "Birth Date"]
+    type: date
+  - name: sex
+    label: Sex
+    aliases: ["Gender"]
+    pattern: 'M|F|MALE|FEMALE'
+  - name: nationality
+    label: Nationality
+  - name: place_of_birth
+    label: Place of Birth
+    aliases: ["District of Birth", "Birth Place"]
+  - name: place_of_issue
+    label: Place of Issue
+    aliases: ["Issued At"]
+  - name: date_of_issue
+    label: Date of Issue
+    aliases: ["Issue Date", "Date Issued"]
+    type: date
+  - name: date_of_expiry
+    label: Date of Expiry
+    aliases: ["Expiry Date", "Valid Until", "Expires"]
+    type: date
