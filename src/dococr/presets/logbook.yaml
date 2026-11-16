@@ -3,13 +3,15 @@ title: Vehicle logbook
 description: Vehicle registration certificate (logbook) listing the vehicle's particulars and registered owner.
 aliases: ["log book", "vehicle logbook", "vehicle registration"]
 # Printed on the logbook but not extracted here; they only mark where a neighbouring value ends.
-other_labels: ["Tax Class", "Axles", "Load Capacity", "Customs Entry No", "Duty",
-               "Previous Owner", "Postal Address", "Address", "ID No", "ID Number"]
+other_labels: ["Customs Entry No", "Previous Owner", "Postal Address", "Address", "ID No", "ID Number",
+               "Registration Certificate", "Republic of Kenya", "Traffic Act", "Particulars",
+               "Registered Owner(s)", "Transfer", "Usual signature", "For Official Use Only",
+               "Authorising Signature and Official Seal", "Important"]
 fields:
   - name: registration_number
     label: Registration No
     aliases: ["Reg No", "Registration Number", "Number Plate", "Reg Number", "Registration Mark",
-              "Vehicle Registration No", "Vehicle Registration Number"]
+              "Vehicle Registration No", "Vehicle Registration Number", "Registration"]
     type: identifier
     pattern: 'K[A-Z]{2}\s?\d{3}\s?[A-Z]?'
     description: Number plate, e.g. KDA 123A.
@@ -24,7 +26,7 @@ fields:
     type: identifier
   - name: make
     label: Make
-    aliases: ["Vehicle Make"]
+    aliases: ["Vehicle Make", "Make of Vehicle"]
   - name: model
     label: Model
     aliases: ["Vehicle Model"]
@@ -44,7 +46,7 @@ fields:
     pattern: '(19|20)\d{2}'
   - name: engine_capacity
     label: Rating
-    aliases: ["Engine Capacity", "CC", "Engine Rating", "Rating (CC)", "Capacity"]
+    aliases: ["Engine Capacity", "CC", "Engine Rating", "Rating (CC)", "Capacity", "Rating (cc)"]
     type: integer
   - name: passengers
     label: Passengers
@@ -52,11 +54,11 @@ fields:
     type: integer
   - name: tare_weight
     label: Tare Weight
-    aliases: ["Tare", "Tare Wt"]
+    aliases: ["Tare", "Tare Wt", "Tare Weight (Kgs)"]
     type: integer
   - name: gross_weight
     label: Gross Weight
-    aliases: ["Gross Vehicle Weight", "Gross Wt"]
+    aliases: ["Gross Vehicle Weight", "Gross Wt", "Gross Weight (Kgs)"]
     type: integer
   - name: owner_name
     label: Registered Owner
@@ -80,5 +82,48 @@ fields:
     type: identifier
   - name: previous_registration
     label: Previous Registration
-    aliases: ["Previous Reg No", "Previous Reg Number", "Prev Reg"]
+    aliases: ["Previous Reg No", "Previous Reg Number", "Prev Reg", "Previous Registration"]
     type: identifier
+  # Fields below were added from a real registration certificate.
+  - name: vehicle_type
+    label: Type of Vehicle
+    aliases: ["Vehicle Type"]
+  - name: tax_class
+    label: Tax Class
+  - name: axles
+    label: No. of Axles
+    aliases: ["No of Axles", "Number of Axles", "Axles"]
+    type: integer
+  - name: load_capacity
+    label: Load Capacity (Kgs)
+    aliases: ["Load Capacity"]
+    type: integer
+  - name: previous_registration_country
+    label: Previous Reg. Country
+    aliases: ["Previous Reg Country", "Previous Registration Country"]
+  - name: duty
+    label: Duty
+  - name: previous_owners
+    label: Number of Previous Owners
+    aliases: ["No. of Previous Owners"]
+    type: integer
+  - name: owner_box
+    label: Box No.
+    aliases: ["Box No", "P.O. Box"]
+    type: identifier
+  - name: owner_postal_code
+    label: Code
+    aliases: ["Postal Code"]
+    type: identifier
+  - name: owner_town
+    label: Town
+  - name: transfer_number
+    label: Transfer No
+    aliases: ["TRANSFER No"]
+    type: identifier
+  - name: certificate_serial
+    label: Serial No
+    aliases: ["Certificate Serial No"]
+    type: identifier
+    pattern: '[A-Z]\d{7}\s?[A-Z]'
+    description: Serial printed by the barcode, e.g. N1234567 R. It has no printed label, so it is found by its shape.
