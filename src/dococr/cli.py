@@ -174,6 +174,10 @@ def fields(
 def serve(
     host: str = typer.Option("127.0.0.1", help="Interface to bind. Default is local only."),
     port: int = typer.Option(8000, help="Port."),
+    max_connections: int = typer.Option(
+        100, "--max-connections", min=1,
+        help="Most connections open at once; further ones get 503.",
+    ),
     warm_up: bool = typer.Option(
         True,
         "--warm-up/--no-warm-up",
@@ -197,4 +201,7 @@ def serve(
             pipeline.warm_up()
         except ExtractorError as exc:  # fail here, with a plain message, not on the first request
             raise _fail(f"cannot start the service: {exc}")
-    uvicorn.run(api_app, host=host, port=port)
+    # A cap on open connections bounds what idle or deliberately slow clients can hold, and a
+    # shutdown deadline lets the service stop while a long extraction is still running.
+    uvicorn.run(api_app, host=host, port=port, limit_concurrency=max_connections,
+                timeout_keep_alive=5, timeout_graceful_shutdown=10)

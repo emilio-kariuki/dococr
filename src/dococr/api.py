@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -56,7 +57,41 @@ async def _lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="dococr", version="0.1.0", lifespan=_lifespan)
+DOCS_ENV = "DOCOCR_API_DOCS"
+
+
+def _docs_enabled() -> bool:
+    return os.environ.get(DOCS_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# The interactive API pages describe every endpoint to whoever can reach the service, so they
+# are off unless asked for.
+app = FastAPI(
+    title="dococr", version="0.1.0", lifespan=_lifespan,
+    docs_url="/docs" if _docs_enabled() else None,
+    redoc_url="/redoc" if _docs_enabled() else None,
+    openapi_url="/openapi.json" if _docs_enabled() else None,
+)
+
+MAX_CONCURRENT_ENV = "DOCOCR_MAX_CONCURRENT"
+DEFAULT_MAX_CONCURRENT = 2
+BUSY_WAIT_SECONDS = 30.0
+MAX_FIELDS = 200
+MAX_FIELDS_TEXT = 20_000  # characters of the `fields` form value
+MAX_NAME_LENGTH = 200  # characters of a document type or field name
+
+
+def _max_concurrent() -> int:
+    try:
+        n = int(os.environ.get(MAX_CONCURRENT_ENV, DEFAULT_MAX_CONCURRENT))
+    except ValueError:
+        return DEFAULT_MAX_CONCURRENT
+    return n if n >= 1 else DEFAULT_MAX_CONCURRENT
+
+
+# Each extraction decodes and preprocesses whole pages in memory. The OCR engine reads one page
+# at a time anyway, so letting dozens of requests decode at once only multiplies memory.
+_extract_slots = threading.BoundedSemaphore(_max_concurrent())
 
 
 def max_upload_bytes() -> int:
@@ -121,17 +156,24 @@ app.add_middleware(_UploadGuard)
 def _parse_fields(text: Optional[str]) -> Optional[list[str]]:
     if not text or not text.strip():
         return None
+    if len(text) > MAX_FIELDS_TEXT:
+        raise HTTPException(422, f"fields: longer than {MAX_FIELDS_TEXT} characters")
     text = text.strip()
     if text.startswith("["):
         try:
             items = json.loads(text)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             raise HTTPException(422, "fields: invalid JSON list")
         if not isinstance(items, list) or not all(isinstance(i, str) for i in items):
             raise HTTPException(422, "fields: expected a list of strings")
     else:
         items = text.split(",")
-    return [i.strip() for i in items if i.strip()] or None
+    names = [i.strip() for i in items if i.strip()]
+    if len(names) > MAX_FIELDS:
+        raise HTTPException(422, f"fields: more than {MAX_FIELDS} names")
+    if any(len(n) > MAX_NAME_LENGTH for n in names):
+        raise HTTPException(422, f"fields: a name is longer than {MAX_NAME_LENGTH} characters")
+    return names or None
 
 
 @app.get("/health")
@@ -177,6 +219,8 @@ def extract_endpoint(
     if _is_path(doc_type):
         # load_doc_type would read a file path from the server's disk
         raise HTTPException(422, "doc_type must be a document type name, not a file path")
+    if len(doc_type) > MAX_NAME_LENGTH:
+        raise HTTPException(422, f"doc_type: longer than {MAX_NAME_LENGTH} characters")
     wanted = _parse_fields(fields)
     pdf_text = pdf_text_mode()
 
@@ -203,15 +247,22 @@ def extract_endpoint(
         parts.append(bytes(data))
 
     source = parts[0] if len(parts) == 1 else parts
+    if not _extract_slots.acquire(timeout=BUSY_WAIT_SECONDS):
+        raise HTTPException(503, "the service is busy; try again shortly", headers={"Retry-After": "10"})
     try:
         result = pipeline.extract(
             source, doc_type, wanted, include_raw_text=include_raw_text, max_pages=pages_allowed,
             pdf_text=pdf_text,
         )
     except ExtractorError as exc:
-        raise HTTPException(503, str(exc))
+        # The engine's own message can carry library paths and internals; it goes to the
+        # server log (it holds no document content), and the client gets a plain statement.
+        log.error("extraction failed: %s", " ".join(str(exc).split())[:500])
+        raise HTTPException(503, "the OCR engine could not process this document")
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    except (OSError, Image.DecompressionBombError):
+    except (OSError, MemoryError, Image.DecompressionBombError):
         raise HTTPException(422, "the uploaded file is not a readable image or PDF")
+    finally:
+        _extract_slots.release()
     return result.model_dump(mode="json")

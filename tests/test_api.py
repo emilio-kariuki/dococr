@@ -95,7 +95,9 @@ def test_extractor_error_503(monkeypatch):
 
     monkeypatch.setattr("dococr.pipeline.get_extractor", lambda: Bad())
     r = post(TestClient(app))
-    assert r.status_code == 503 and "model file missing" in r.json()["detail"]
+    # the engine's own message stays in the server log; the client gets a plain statement
+    assert r.status_code == 503 and "model file" not in r.text
+    assert r.json()["detail"] == "the OCR engine could not process this document"
 
 
 def test_upload_not_written_to_disk(client, monkeypatch):
