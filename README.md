@@ -27,7 +27,7 @@ that run over several lines, and values inside the sentences of a typed agreemen
 [Python](#python) · [Output](#output) · [HTTP service](#http-service) ·
 [Using it in an existing project](#using-it-in-an-existing-project) ·
 [Document types and fields](#document-types-and-fields) · [How it reads a page](#how-it-reads-a-page) ·
-[Accuracy and limits](#accuracy-and-limits) · [Performance](#performance) · [Development](#development)
+[Accuracy and limits](#accuracy-and-limits) · [Security](#security) · [Performance](#performance) · [Development](#development)
 
 Working on the code? See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Coding agents: see
 [AGENTS.md](AGENTS.md).
@@ -281,7 +281,7 @@ curl -F file=@logbook.jpg -F doc_type=logbook -F fields=registration_number,owne
 | 411 | The request has no `Content-Length`. |
 | 413 | The request body is over the size limit. |
 | 422 | A form field is missing or malformed, the file is empty or not a readable image, `doc_type` has no YAML file and no `fields` were given, `doc_type` is a file path, or the type's YAML file is broken. |
-| 503 | The OCR engine cannot run. |
+| 503 | The OCR engine could not process the document (details go to the server log, not the response), or the service is busy: too many extractions or connections at once. Retry shortly. |
 
 Things to know before you deploy it:
 
@@ -294,6 +294,20 @@ Things to know before you deploy it:
 - **Upload limit.** 10 MB by default, for the whole request, however many files it carries. Change it with the `DOCOCR_MAX_UPLOAD_MB` environment
   variable, which also accepts fractions. The limit is checked against the declared size of the
   request before the body is read.
+- **Image size limits.** A page over 64 megapixels (`DOCOCR_MAX_MEGAPIXELS`), smaller than 16
+  pixels on a side, or more than 30 times longer than it is wide is refused with 422 before it is
+  decoded. These exist because a file of a few kilobytes can otherwise demand gigabytes of memory.
+  Only PNG, JPEG, TIFF, WebP, GIF and BMP images, and PDFs, are read.
+- **Load limits.** At most 2 extractions run at once (`DOCOCR_MAX_CONCURRENT`); others wait up to
+  30 seconds and then get 503. Expect up to about 1.6 GB of memory per running extraction for the
+  largest accepted image. At most 100 connections are open at once (`dococr serve
+  --max-connections`). Request input is bounded: 200 field names, 200 characters per name.
+- **Put a reverse proxy in front if it faces a network you do not control.** The service has no
+  request-header timeout, so clients that open connections and send nothing can hold all 100
+  connection slots and lock others out. A proxy such as nginx or Caddy adds timeouts, rate limits,
+  TLS and authentication.
+- **API description pages are off.** Set `DOCOCR_API_DOCS=1` to serve `/docs`, `/redoc` and
+  `/openapi.json`.
 - **OCR work is not parallel inside a process.** Requests wait for each other at the OCR engine.
   For more throughput, run several processes: `uvicorn dococr.api:app --workers 4`.
 - **Document types are names only.** A request cannot make the server read a file path. To serve
@@ -413,7 +427,7 @@ Keys for each field:
 | `label` | The label as printed. Defaults to the name with underscores turned into spaces. |
 | `aliases` | Every other printed form of the label. Nothing is expanded for you: if a document prints `Member No` on one version and `Member Number` on another, list both. |
 | `type` | How the value is cleaned up. See the table below. Defaults to `string`. A date is only returned as `YYYY-MM-DD` when the field says `type: date`. |
-| `pattern` | A regular expression that a valid value matches in full. A value that does not match is still returned, with a warning. If no value is found beside the label and exactly one piece of text on the page matches the pattern, that text is used, with its confidence halved (so at most 0.5) and a warning. |
+| `pattern` | A regular expression that a valid value matches in full. A value that does not match is still returned, with a warning. If no value is found beside the label and exactly one piece of text on the page matches the pattern, that text is used, with its confidence halved (so at most 0.5) and a warning. A pattern that repeats a group which itself repeats without limit, such as `(a+)+`, is refused when the file is loaded, because it can take practically forever on some text. |
 | `multiline` | `true` when the value can run onto the following lines, such as an address. See [Values over several lines](#values-over-several-lines). |
 | `until` | The words that come straight after the value. Use it for a value inside a sentence. One text or a list of alternatives. See [Values inside sentences](#values-inside-sentences). |
 | `description` | A note for people reading the file. It does not affect matching. |
@@ -694,6 +708,23 @@ Other things to know:
   has been checked against a real one. Correct them against your own scans, or write your own
   files for documents from elsewhere.
 - **Speed.** See [Performance](#performance).
+
+## Security
+
+The service and the library were attacked deliberately (hostile images and PDFs, oversized and
+malformed requests, path tricks in every parameter, slow connections, hostile YAML) and the
+findings fixed; `tests/test_security.py` keeps each attack as a regression test.
+
+- **Untrusted input is bounded before it is decoded:** upload size, page count, megapixels, page
+  shape, characters per PDF page, length of typed values, number and length of field names.
+- **Nothing a request names is read from disk.** A document type is looked up by name only, upload
+  file names are ignored, and uploads are never written to disk.
+- **Corrupted PDFs** (200 mutated files) were handled without a crash or hang.
+- **Known gap: the image library.** Pillow 13.0.0 fixes a long list of published vulnerabilities
+  and needs Python 3.11 or newer; on Python 3.10 the newest available is 12.3.0. dococr limits the
+  exposure by decoding only six image formats, but run it on Python 3.11+ to get the fixed
+  version. `requirements.lock` records the exact versions this code was tested with.
+- **YAML files are trusted input.** Do not load document type files from people you do not trust.
 
 ## Performance
 

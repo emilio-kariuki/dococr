@@ -565,6 +565,30 @@ Consequences: within a process OCR work does not run in parallel, and ONNX Runti
 CPU threads for the call in hand. Throughput comes from running more processes. Each process loads
 its own copy of the models.
 
+## Limits on untrusted input
+
+Found by attacking a running service; each has a regression test in `tests/test_security.py`.
+
+| Limit | Where | Why |
+|---|---|---|
+| 64 megapixels per page (`DOCOCR_MAX_MEGAPIXELS`), checked on the header before decoding | `imaging._check_pixels` | A blank 13300×13300 PNG is 21 KB and cost 2 GB and 10 s; six at once cost 12.5 GB. |
+| Short side at least 16 px, long side at most 30 times the short | `imaging._check_shape`, and PDF page boxes | The detector enlarges the short side to 736 px, so a 96-byte 3×3000 PNG asked for 5.7 GB and a thin PDF page for 11.4 GB. |
+| At most 12 megapixels after the detector's own resizing, else no lines are returned | `RapidOcrEngine._too_big_for_detector` | The same blow-up for anything that reaches the engine without passing `imaging`, such as a crop of a PDF page. |
+| Six image decoders only | `imaging.IMAGE_FORMATS` | Most published Pillow vulnerabilities are in formats a document never comes in. |
+| 20,000 characters per PDF page, else the page is OCR'd | `pdftext.MAX_PAGE_CHARS` | A 376 KB page of microscopic text cost 21 s in the matcher. |
+| 2,000 characters for a `date`, `integer` or `number` value | `normalize.MAX_TYPED_LENGTH` | 65,000 characters of glued number words took 4.5 s to parse. |
+| No unbounded repeat inside an unbounded repeat in `pattern` | `models._nested_unbounded_repeat` | `(a+)+$` did not finish on 31 characters. |
+| 2 extractions at once (`DOCOCR_MAX_CONCURRENT`), 30 s wait, then 503 | `api._extract_slots` | Each extraction holds decoded pages; the thread pool would otherwise run 40. |
+| 100 connections, 10 s shutdown deadline | `cli.serve` (uvicorn) | Idle connections were unbounded, and a running extraction blocked shutdown. |
+| 200 field names, 200 characters per name, 20,000 characters of `fields` | `api._parse_fields` | Deeply nested JSON raised an unhandled `RecursionError`. |
+
+Engine error text (library paths, assertions) goes to the server log only; the response says the
+document could not be processed. The API description pages are off unless `DOCOCR_API_DOCS=1`.
+
+Not fixed in code: uvicorn has no request-header timeout, so slow clients can hold all the
+connection slots (a reverse proxy is the remedy), and Pillow 13 with its vulnerability fixes needs
+Python 3.11 or newer.
+
 ## HTTP service (`api.py`)
 
 - **Endpoints** are documented in the README.

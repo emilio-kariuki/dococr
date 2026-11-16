@@ -158,6 +158,11 @@ change to `ocr/` or `preprocess.py`; a speed-up that loses fields is not accepte
   repository**, and their contents and people's names must not be copied into tests or docs.
 - **Changes to sentence reading need all four fixture evaluations**, not only the shipped types:
   no shipped YAML uses `until`, so the default evaluation cannot see them.
+- **Every limit on untrusted input exists because an attack was measured.** They are listed under
+  "Limits on untrusted input" in `docs/ARCHITECTURE.md`, with a regression test each in
+  `tests/test_security.py`. Do not raise or remove one without re-running the attack. Images are
+  opened only through `imaging.py`, which checks size and shape before decoding and allows six
+  formats; never call `Image.open` elsewhere on untrusted bytes.
 - **Starlette spools uploads over 1 MB to disk.** `_UploadGuard` in `api.py` prevents that. A
   directory listing cannot detect the spooled file because it is unlinked at once; the test watches
   `SpooledTemporaryFile.rollover` instead.
