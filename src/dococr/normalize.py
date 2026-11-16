@@ -555,6 +555,36 @@ def _has_mixed_groups(text: str) -> bool:
     return False
 
 
+def _irregular_separators(text: str) -> bool:
+    """True when the first number in `text` has separators that do not form a regular number:
+    "9.492157.75", "3,760,12.00", "7,532936", "93.370.00". Reading such a number at all is a
+    guess, and a misread separator changes its size by orders of magnitude, so the caller warns.
+
+    Regular means: groups of three digits divided by one kind of separator, then at most one
+    decimal part behind a different separator; or a single '.' or ',' decimal. A comma before
+    more than three final digits is not a decimal anyone writes."""
+    m = re.search(r"\d[\d,.' ]*\d", text)
+    if not m:
+        return False
+    token = re.sub(r"(?<=[,.']) +", "", m.group(0).strip())  # OCR often adds a space after a mark
+    parts = re.split(r"([,.' ])", token)
+    digits, seps = parts[0::2], parts[1::2]
+    if not any(sep in ",.'" for sep in seps):
+        return False
+    if any(not d for d in digits):
+        return True
+    if len(seps) == 1:
+        if seps[0] == ".":
+            return False
+        return len(digits[1]) > 3 if seps[0] == "," else len(digits[1]) != 3
+    decimal = seps[-1] if seps[-1] in ".," and seps[-1] not in seps[:-1] else None
+    group_seps = seps[:-1] if decimal else seps
+    groups = digits[1:-1] if decimal else digits[1:]
+    if len(set(group_seps)) != 1 or len(digits[0]) > 3:
+        return True
+    return any(len(g) != 3 for g in groups)
+
+
 def _parse_number(text: str) -> Optional[tuple[float, int, bool]]:
     """Return (number, count of numbers found, used look-alike repair) or None."""
     repaired = False
@@ -611,6 +641,9 @@ def _normalize_number(raw: str, integer: bool) -> tuple[Value, list[str]]:
         warnings.append("corrected letters misread as digits")
     if _has_mixed_groups(text):
         warnings.append("both '.' and ',' separate groups of three digits; read as thousands")
+    elif _irregular_separators(text):
+        warnings.append("the separators in the number are irregular (a misread ',' or '.' changes "
+                        "its size); check the value")
     if integer:
         if number != int(number):
             warnings.append("value is not a whole number; rounded")

@@ -440,3 +440,18 @@ def test_typed_field_without_a_parse_has_no_value_but_keeps_its_warning():
         value, warnings = normalize_value(raw, spec)
         assert value is None and warning in warnings
         assert normalize_value(value, spec) == (None, [])  # idempotent
+
+
+def test_irregular_separators_in_a_number_are_flagged():
+    """A misread ',' or '.' in an amount changes its size silently: "9,492,157.75" read as
+    "9.492157.75" came back as 949215775 with no warning."""
+    from dococr.models import FieldSpec
+
+    for kind in ("integer", "number"):
+        spec = FieldSpec(name="amount", type=kind)
+        for raw in ("9.492157.75", "3,760,12.00", "7,532936", "93.370.00"):
+            _, warnings = normalize_value(raw, spec)
+            assert any("separators" in w for w in warnings), (kind, raw, warnings)
+        for raw in ("2,525,737", "1,200.50", "12.5", "7,5", "1 200 000", "850000", "2.450.000", "1'200'000", "12,50"):
+            _, warnings = normalize_value(raw, spec)
+            assert not any("separators" in w for w in warnings), (kind, raw, warnings)
