@@ -37,12 +37,47 @@ class PageLines:
     claimed: dict = field(default_factory=dict)
 
 
+@dataclass
+class PageRead:
+    """A page read but not yet matched: its text lines, and what reading it did.
+
+    Returned by `Extractor.read_page` and given back to `Extractor.match_page`, so one reading
+    of a page (the OCR, about a second) can be matched against several document types (about
+    10 ms each), which is how the document type is detected. `lines`, `size` and `to_original`
+    mean what they mean in `PageLines`; `warnings` are the page-level notes of the reading
+    (rotation, deskew, text layer) that `extract` would have returned."""
+
+    lines: list
+    size: tuple[float, float]
+    to_original: Callable = field(default=_identity)
+    warnings: list = field(default_factory=list)
+
+
 class Extractor(ABC):
     name: ClassVar[str]
     # True when `extract` accepts the keyword `text_layer` (a `dococr.pdftext.TextLayer`: text
     # lines read from a PDF's text layer, in the image's pixel coordinates, to use in place of
     # OCR). The pipeline passes it only to extractors that set this; others get images only.
     supports_text_layer: ClassVar[bool] = False
+
+    # Optional, for detecting the document type: an extractor that implements both methods
+    # below lets the pipeline read each page once and try every candidate type on the same
+    # lines. One that does not still extracts with a named type; asking it to detect the type
+    # is refused with a ValueError before any page is read.
+    def read_page(self, image: Image.Image, *, text_layer=None) -> PageRead:
+        """Read `image` (and `text_layer`, when `supports_text_layer`) into text lines without
+        matching any document type."""
+        raise NotImplementedError
+
+    def match_page(self, page: PageRead, doc_type: DocType, fields: list[FieldSpec]) -> ExtractorOutput:
+        """Match the lines of a page read by `read_page`; the same contract as `extract`."""
+        raise NotImplementedError
+
+    @property
+    def supports_reading(self) -> bool:
+        """True when this extractor implements `read_page` and `match_page`."""
+        cls = type(self)
+        return cls.read_page is not Extractor.read_page and cls.match_page is not Extractor.match_page
 
     @abstractmethod
     def extract(

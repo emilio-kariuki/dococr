@@ -13,7 +13,7 @@ from typing import Optional
 
 from PIL import Image
 
-from dococr.extractors.base import Extractor, ExtractorError, PageLines
+from dococr.extractors.base import Extractor, ExtractorError, PageLines, PageRead
 from dococr.models import DocType, ExtractorOutput, FieldResult, FieldSpec
 from dococr.ocr import Box, OcrEngine, OcrLine, get_default_engine
 from dococr.ocr.matcher import match_fields
@@ -70,38 +70,44 @@ class LocalExtractor(Extractor):
 
     def extract(self, image: Image.Image, doc_type: DocType, fields: list[FieldSpec],
                 *, text_layer=None) -> ExtractorOutput:
+        return self.match_page(self.read_page(image, text_layer=text_layer), doc_type, fields)
+
+    def read_page(self, image: Image.Image, *, text_layer=None) -> PageRead:
+        """The page's text lines: from the text layer (`kind` "text" or "hybrid", with the
+        areas it does not cover read by OCR), or by OCR."""
         if text_layer is not None and text_layer.kind in ("text", "hybrid"):
-            return self._extract_text(image, doc_type, fields, text_layer)
+            return self._read_text(image, text_layer)
         work, transform, lines = self._ocr(image)
         warnings = list(transform.notes)
         if text_layer is not None:
             warnings = list(text_layer.notes) + warnings
-        if not lines:
+        return PageRead(list(lines), (work.shape[1], work.shape[0]), transform.box_to_original, warnings)
+
+    def match_page(self, page: PageRead, doc_type: DocType, fields: list[FieldSpec]) -> ExtractorOutput:
+        warnings = list(page.warnings)
+        if not page.lines:
             warnings.append("no text found on the image")
             return ExtractorOutput(
                 fields=[FieldResult(name=f.name, warnings=["no text found"]) for f in fields],
                 raw_text="",
                 warnings=warnings,
             )
-
-        page_size = (work.shape[1], work.shape[0])
-        matches, text = match_fields(lines, doc_type, fields, page_size=page_size)
+        matches, text = match_fields(page.lines, doc_type, fields, page_size=page.size)
         results = [
             FieldResult(
                 name=m.name,
                 raw=m.raw,
                 confidence=m.confidence,
-                bbox=transform.box_to_original(m.box) if m.box is not None else None,
+                bbox=page.to_original(m.box) if m.box is not None else None,
                 warnings=m.warnings,
             )
             for m in matches
         ]
         out = ExtractorOutput(fields=results, raw_text=text, warnings=warnings)
-        out._page_lines = PageLines(lines, page_size, transform.box_to_original, _claimed(matches))
+        out._page_lines = PageLines(page.lines, page.size, page.to_original, _claimed(matches))
         return out
 
-    def _extract_text(self, image: Image.Image, doc_type: DocType, fields: list[FieldSpec],
-                      layer) -> ExtractorOutput:
+    def _read_text(self, image: Image.Image, layer) -> PageRead:
         """A PDF page read from its text layer; areas it does not cover (`layer.regions`) are
         read by OCR and their lines added, except where the text layer already has the text."""
         lines: list[OcrLine] = list(layer.lines)
@@ -119,24 +125,8 @@ class LocalExtractor(Extractor):
                 if any(_overlap(box, known.box) > OVERLAP_DROP for known in layer.lines):
                     continue
                 lines.append(OcrLine(line.text, line.confidence, box))
-        if not lines:
-            warnings.append("no text found on the image")
-            return ExtractorOutput(
-                fields=[FieldResult(name=f.name, warnings=["no text found"]) for f in fields],
-                raw_text="", warnings=warnings)
         page_size = (image.width, image.height)
-        matches, text = match_fields(lines, doc_type, fields, page_size=page_size)
-        results = [
-            FieldResult(
-                name=m.name, raw=m.raw, confidence=m.confidence,
-                bbox=_int_box(m.box, page_size) if m.box is not None else None,
-                warnings=m.warnings)
-            for m in matches
-        ]
-        out = ExtractorOutput(fields=results, raw_text=text, warnings=warnings)
-        out._page_lines = PageLines(lines, page_size, lambda box: _int_box(box, page_size),
-                                    _claimed(matches))
-        return out
+        return PageRead(lines, page_size, lambda box: _int_box(box, page_size), warnings)
 
 
 def _claimed(matches) -> dict:
