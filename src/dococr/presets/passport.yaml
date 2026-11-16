@@ -1,6 +1,9 @@
 name: passport
 title: Passport
 description: Passport biographical data page.
+# Printed text that tells what the document is; used only to detect the type. Written from
+# general knowledge of the data page, not checked against a real one.
+identifying_text: ["Republic of Kenya", "Passport", "Passeport"]
 # Printed on the data page but not extracted here; they only mark where a neighbouring value ends.
 other_labels: ["Type", "Personal No", "ID No", "Signature", "Holder's Signature"]
 fields:

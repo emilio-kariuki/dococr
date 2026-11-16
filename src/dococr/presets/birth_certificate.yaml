@@ -4,6 +4,9 @@ name: birth_certificate
 title: Certificate of birth
 description: Certificate of birth issued by the civil registrar.
 aliases: ["certificate of birth", "birth cert"]
+# Printed text that tells what the document is; used only to detect the type. Seen on one real
+# certificate.
+identifying_text: ["Republic of Kenya", "Certificate of Birth"]
 other_labels:
   - Republic of Kenya
   - Certificate of Birth

@@ -2,6 +2,9 @@ name: logbook
 title: Vehicle logbook
 description: Vehicle registration certificate (logbook) listing the vehicle's particulars and registered owner.
 aliases: ["log book", "vehicle logbook", "vehicle registration"]
+# Printed text that tells what the document is; used only to detect the type. Seen on one real
+# registration certificate.
+identifying_text: ["Republic of Kenya", "Registration Certificate", "Traffic Act"]
 # Printed on the logbook but not extracted here; they only mark where a neighbouring value ends.
 other_labels: ["Customs Entry No", "Previous Owner", "Postal Address", "Address", "ID No", "ID Number",
                "Registration Certificate", "Republic of Kenya", "Traffic Act", "Particulars",

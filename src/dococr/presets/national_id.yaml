@@ -2,6 +2,9 @@ name: national_id
 title: National ID card
 description: Government-issued national identity card (front and/or back).
 aliases: ["id", "id card", "identity card"]
+# Printed text that tells what the document is; used only to detect the type. Written from
+# general knowledge of the card, not checked against a real one.
+identifying_text: ["Republic of Kenya", "National Identity Card", "Principal Registrar"]
 # Printed on the card but not extracted here; they only mark where a neighbouring value ends.
 other_labels: ["Holder's Sign", "Holder's Signature", "Signature", "District", "Division",
                "Location", "Sub-Location"]

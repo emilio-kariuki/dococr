@@ -1,6 +1,7 @@
 """Where the time goes: per-stage timings of the extraction pipeline (real OCR model).
 
     .venv/bin/python tests/local/bench.py [--reps 5] [--warm-up] [IMAGE:DOCTYPE ...]
+    .venv/bin/python tests/local/bench.py --detect [--reps 5]
 
 Runs a fixed set of synthetic pages, plus any images you name, and prints for each the best
 wall-clock time of `--reps` warm runs, split by stage, and the CPU time of that run. On a
@@ -46,8 +47,13 @@ def main() -> None:
                     help="also time the multi-line form and prose fixture pages")
     ap.add_argument("--pdf", action="store_true",
                     help="also time a digital PDF read from its text layer and by OCR")
+    ap.add_argument("--detect", action="store_true",
+                    help="time document type detection instead: see `bench_detect`")
     ap.add_argument("images", nargs="*", help="IMAGE:DOCTYPE pairs to time as well")
     args = ap.parse_args()
+    if args.detect:
+        bench_detect(args.reps)
+        return
 
     started = time.perf_counter()
     import dococr.pipeline as pipeline
@@ -137,6 +143,61 @@ def main() -> None:
         print(f"{name:26}{best[0]:7.2f}{best[1]:7.2f}{best[3]:6d}{best[0] / best[3]:9.2f}"
               + "".join(f"{best[2].get(k, 0):10.2f}" for k in keys))
     print(f"{'total':26}{total_wall:7.2f}{total_cpu:7.2f}")
+
+
+def bench_detect(reps: int) -> None:
+    """Detection against plain extraction, best of `reps`, wall and CPU seconds.
+
+    For each page: `extract` with the type named; `detect` and `extract(..., "auto")` among
+    the 5 shipped types, and among those plus the 5 fixture types (10); and the matching part
+    alone (`detect_lines` on lines already read) among 1, 5, 10 and 50 types (the 50 are the 10
+    repeated with every text changed, so none is a duplicate)."""
+    from dococr import detect, extract, get_extractor, list_doc_types, load_doc_type
+    from dococr.detection import detect_lines
+    from synth import FIXTURE_TYPES, doc_type_ref, make_document
+
+    shipped = [load_doc_type(n) for n in list_doc_types() if n not in FIXTURE_TYPES]
+    ten = shipped + [load_doc_type(doc_type_ref(n)) for n in FIXTURE_TYPES]
+    fifty = list(ten)
+    for i in range(40):
+        d = ten[i % len(ten)].model_copy(deep=True)
+        d.name, d.title = f"{d.name}_v{i}", f"copy {i}"
+        for f in d.fields:
+            f.label, f.aliases = f"{f.label} V{i}", [f"{a} V{i}" for a in f.aliases]
+            if f.until is not None:
+                f.until = [f"{u} V{i}" for u in f.until_texts()]
+        d.other_labels = [f"{o} V{i}" for o in d.other_labels]
+        d.identifying_text = [f"{t} V{i}" for t in d.identifying_text]
+        fifty.append(d)
+    ex = get_extractor()
+    ex.warm_up()
+
+    def best(fn):
+        out = None
+        for _ in range(reps):
+            wall, cpu = time.perf_counter(), time.process_time()
+            fn()
+            wall, cpu = time.perf_counter() - wall, time.process_time() - cpu
+            out = (wall, cpu) if out is None or wall < out[0] else out
+        return out
+
+    pages = [("logbook", "clean"), ("national_id", "photo"), ("synth_contract", "clean"),
+             ("synth_ruled", "clean")]
+    print(f"cpus={os.cpu_count()} load={os.getloadavg()[0]:.0f}  best of {reps}; wall / cpu seconds")
+    head = ["extract named", "detect 5", "detect 10", "auto 10", "match 1", "match 5", "match 10",
+            "match 50"]
+    print(f"{'page':22}" + "".join(f"{h:>15}" for h in head))
+    for dtp, var in pages:
+        image = make_document(dtp, var, 3).image
+        ref = doc_type_ref(dtp)
+        page = ex.read_page(image)
+        cells = [best(lambda: extract(image, ref)),
+                 best(lambda: detect(image, shipped)),
+                 best(lambda: detect(image, ten)),
+                 best(lambda: extract(image, "auto", candidates=ten))]
+        for cands in (ten[:1], shipped, ten, fifty):
+            cells.append(best(lambda: detect_lines([page], cands)))
+        print(f"{dtp + '/' + var:22}" + "".join(f"{w:8.3f}/{c:<6.3f}" for w, c in cells))
 
 
 if __name__ == "__main__":

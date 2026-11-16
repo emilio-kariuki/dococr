@@ -152,6 +152,11 @@ class DocType(BaseModel):
     # How the document writes numeric dates: "day_first" or "month_first". The default for every
     # field that does not set its own `date_order`; None means day first.
     date_order: Optional[Literal["day_first", "month_first"]] = None
+    # Text printed on the document that tells what document it is, such as its heading or the
+    # name of the law it is issued under. Used only to detect the document type
+    # (`dococr.detection`): found, it counts for the type; missing (cut off, unreadable) it does
+    # not count against it. Never used to find or bound a value.
+    identifying_text: list[str] = Field(default_factory=list)
     fields: list[FieldSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -205,6 +210,46 @@ class ExtractorOutput(BaseModel):
     _page_lines: Any = PrivateAttr(default=None)
 
 
+class Evidence(BaseModel):
+    """One piece of printed text that was found for a candidate document type."""
+
+    text: str  # as written in the YAML file
+    kind: Literal["identifying_text", "title", "label", "other_label"]
+    field: Optional[str] = None  # the field whose label or end text it is (kind "label")
+    weight: float  # how distinctive it is among the candidate types: 1 = only this type has it
+    page: int  # 1-based page it was found on (the first, when on several)
+
+
+class DetectionCandidate(BaseModel):
+    """A candidate document type and how well the page matches it."""
+
+    doc_type: str
+    title: str = ""
+    score: float  # 0..1: harmonic mean of `coverage` and `precision`
+    # Weighted share of this type's labels (one per field, plus each other label) found on the
+    # page; identifying text adds to it when found and is not counted when missing.
+    coverage: float
+    # Weighted share of the text found for any candidate that this type also explains.
+    precision: float
+    found: int  # how many of its labels (one per field, plus other labels) were found; identifying text not counted
+    total: int  # how many labels it has, counted the same way
+    evidence: list[Evidence] = Field(default_factory=list)
+
+
+class Detection(BaseModel):
+    """The result of detecting the document type: the chosen type, or None and why not."""
+
+    doc_type: Optional[str] = None  # None: none of the candidates (see `reason`)
+    score: float = 0.0  # the best candidate's score
+    runner_up: float = 0.0  # the second-best candidate's score (0 with one candidate)
+    reason: str = ""  # why this type was chosen, or why none was
+    candidates: list[DetectionCandidate] = Field(default_factory=list)  # best first, at most a few
+    considered: int = 0  # how many candidate types were scored
+    pages: int = 0  # how many pages the evidence was taken from
+    warnings: list[str] = Field(default_factory=list)
+    elapsed_ms: int = 0  # reading the pages and scoring the candidates
+
+
 class ExtractionResult(BaseModel):
     doc_type: str
     backend: str  # name of the extractor that ran; "local" for the built-in one
@@ -214,6 +259,9 @@ class ExtractionResult(BaseModel):
     raw_text: Optional[str] = None
     elapsed_ms: int = 0
     pages: int = 1  # how many pages were read
+    # Set when the type was detected (doc_type "auto"): which type was chosen and on what
+    # evidence. None when the caller named the type.
+    detection: Optional[Detection] = None
 
     def values(self) -> dict[str, Value]:
         """Just {field: value} — the usual thing callers want."""

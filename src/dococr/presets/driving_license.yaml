@@ -2,6 +2,10 @@ name: driving_license
 title: Driving licence
 description: Driving licence card or booklet.
 aliases: ["driving licence", "drivers license", "driver license", "DL"]
+# Printed text that tells what the document is; used only to detect the type. Written from
+# general knowledge of the licence, not checked against a real one.
+identifying_text: ["Republic of Kenya", "Driving Licence", "Driving License",
+                   "National Transport and Safety Authority"]
 # Printed on the licence but not extracted here; they only mark where a neighbouring value ends.
 other_labels: ["Nationality", "Place of Issue", "Issuing Authority",
                "Address", "Postal Address", "Signature", "Holder's Signature", "Restrictions",

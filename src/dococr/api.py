@@ -21,6 +21,7 @@ from starlette.formparsers import MultiPartParser
 from starlette.responses import JSONResponse
 
 from dococr import pipeline
+from dococr.detection import UnknownDocumentError, is_auto, max_candidates
 from dococr.doctypes import DocTypeError, find_doc_types, load_doc_type
 from dococr.extractors.base import ExtractorError
 from dococr.imaging import DEFAULT_MAX_PAGES
@@ -207,24 +208,36 @@ def doc_type(name: str) -> dict:
     return doc.model_dump(mode="json")
 
 
-@app.post("/extract")
-def extract_endpoint(
-    file: list[UploadFile] = File(
-        ..., description="An image or a PDF. Several parts are the pages of one document, in order."
-    ),
-    doc_type: str = Form(...),
-    fields: Optional[str] = Form(None, description="Comma-separated field names (or a JSON list)."),
-    include_raw_text: bool = Form(False),
-) -> dict:
-    if _is_path(doc_type):
-        # load_doc_type would read a file path from the server's disk
-        raise HTTPException(422, "doc_type must be a document type name, not a file path")
-    if len(doc_type) > MAX_NAME_LENGTH:
-        raise HTTPException(422, f"doc_type: longer than {MAX_NAME_LENGTH} characters")
-    wanted = _parse_fields(fields)
-    pdf_text = pdf_text_mode()
+def _parse_candidates(text: Optional[str]) -> Optional[list[str]]:
+    """Candidate document types for detection: names only (never a file path), at most
+    `max_candidates()`."""
+    if not text or not text.strip():
+        return None
+    limit = max_candidates()
+    if len(text) > MAX_FIELDS_TEXT:
+        raise HTTPException(422, f"candidates: longer than {MAX_FIELDS_TEXT} characters")
+    text = text.strip()
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except (ValueError, RecursionError):
+            raise HTTPException(422, "candidates: invalid JSON list")
+        if not isinstance(items, list) or not all(isinstance(i, str) for i in items):
+            raise HTTPException(422, "candidates: expected a list of strings")
+    else:
+        items = text.split(",")
+    names = [i.strip() for i in items if i.strip()]
+    if len(names) > limit:
+        raise HTTPException(422, f"candidates: more than {limit} names")
+    if any(len(n) > MAX_NAME_LENGTH for n in names):
+        raise HTTPException(422, f"candidates: a name is longer than {MAX_NAME_LENGTH} characters")
+    if any(_is_path(n) for n in names):
+        raise HTTPException(422, "candidates must be document type names, not file paths")
+    return names or None
 
-    pages_allowed = max_pages()
+
+def _read_upload(file: list[UploadFile], pages_allowed: int):
+    """The uploaded parts as bytes (one source, or a list of pages), within the size limits."""
     if len(file) > pages_allowed:
         raise HTTPException(
             422, f"the request has {len(file)} files; the limit is {pages_allowed} pages (DOCOCR_MAX_PAGES)"
@@ -245,24 +258,70 @@ def extract_endpoint(
         if not data:
             raise HTTPException(422, "the uploaded file is empty")
         parts.append(bytes(data))
+    return parts[0] if len(parts) == 1 else parts
 
-    source = parts[0] if len(parts) == 1 else parts
+
+def _run(call):
+    """Run one extraction or detection in a slot, mapping errors to HTTP statuses."""
     if not _extract_slots.acquire(timeout=BUSY_WAIT_SECONDS):
         raise HTTPException(503, "the service is busy; try again shortly", headers={"Retry-After": "10"})
     try:
-        result = pipeline.extract(
-            source, doc_type, wanted, include_raw_text=include_raw_text, max_pages=pages_allowed,
-            pdf_text=pdf_text,
-        )
+        return call()
     except ExtractorError as exc:
         # The engine's own message can carry library paths and internals; it goes to the
         # server log (it holds no document content), and the client gets a plain statement.
         log.error("extraction failed: %s", " ".join(str(exc).split())[:500])
         raise HTTPException(503, "the OCR engine could not process this document")
+    except UnknownDocumentError as exc:
+        raise HTTPException(422, {"message": str(exc), "detection": exc.detection.model_dump(mode="json")})
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     except (OSError, MemoryError, Image.DecompressionBombError):
         raise HTTPException(422, "the uploaded file is not a readable image or PDF")
     finally:
         _extract_slots.release()
+
+
+@app.post("/extract")
+def extract_endpoint(
+    file: list[UploadFile] = File(
+        ..., description="An image or a PDF. Several parts are the pages of one document, in order."
+    ),
+    doc_type: Optional[str] = Form(None, description="Document type name; omitted or 'auto': detect it."),
+    fields: Optional[str] = Form(None, description="Comma-separated field names (or a JSON list)."),
+    include_raw_text: bool = Form(False),
+    candidates: Optional[str] = Form(
+        None, description="With detection: comma-separated type names to choose among (default: all)."),
+) -> dict:
+    auto = doc_type is None or not doc_type.strip() or is_auto(doc_type)
+    if not auto and _is_path(doc_type):
+        # load_doc_type would read a file path from the server's disk
+        raise HTTPException(422, "doc_type must be a document type name, not a file path")
+    if not auto and len(doc_type) > MAX_NAME_LENGTH:
+        raise HTTPException(422, f"doc_type: longer than {MAX_NAME_LENGTH} characters")
+    wanted = _parse_fields(fields)
+    among = _parse_candidates(candidates)
+    pdf_text = pdf_text_mode()
+    pages_allowed = max_pages()
+    source = _read_upload(file, pages_allowed)
+    result = _run(lambda: pipeline.extract(
+        source, "auto" if auto else doc_type, wanted, include_raw_text=include_raw_text,
+        max_pages=pages_allowed, pdf_text=pdf_text, candidates=among,
+    ))
     return result.model_dump(mode="json")
+
+
+@app.post("/detect")
+def detect_endpoint(
+    file: list[UploadFile] = File(
+        ..., description="An image or a PDF. Several parts are the pages of one document, in order."
+    ),
+    candidates: Optional[str] = Form(
+        None, description="Comma-separated type names to choose among (default: all)."),
+) -> dict:
+    among = _parse_candidates(candidates)
+    pdf_text = pdf_text_mode()
+    pages_allowed = max_pages()
+    source = _read_upload(file, pages_allowed)
+    found = _run(lambda: pipeline.detect(source, among, max_pages=pages_allowed, pdf_text=pdf_text))
+    return found.model_dump(mode="json")

@@ -11,10 +11,11 @@ from typing import Optional
 import typer
 
 from dococr import pipeline
+from dococr.detection import UnknownDocumentError, is_auto
 from dococr.doctypes import find_doc_types, load_doc_type, load_doc_type_file
 from dococr.extractors.base import ExtractorError
 from dococr.imaging import DEFAULT_MAX_PAGES, SourceError
-from dococr.models import ExtractionResult
+from dococr.models import Detection, ExtractionResult
 
 app = typer.Typer(
     help="Extract the fields you ask for from photos of documents.",
@@ -46,8 +47,36 @@ def _fail(message: str) -> "typer.Exit":
     return typer.Exit(code=1)
 
 
+_CANDIDATES = typer.Option(
+    None,
+    "--candidates",
+    "-c",
+    help="Comma-separated document types (names or YAML files) to choose among when the type is "
+    "detected. Default: every type found (see `dococr types`).",
+)
+
+
+def _names(text: Optional[str]) -> Optional[list[str]]:
+    return [n.strip() for n in text.split(",") if n.strip()] if text else None
+
+
+def _detection_lines(d: Detection) -> list[str]:
+    verdict = d.doc_type if d.doc_type else "unknown"
+    lines = [f"  detected: {verdict}  ({d.reason})"]
+    width = max((len(c.doc_type) for c in d.candidates), default=0)
+    for c in d.candidates:
+        found = ", ".join(e.text for e in c.evidence[:6]) + (" ..." if len(c.evidence) > 6 else "")
+        lines.append(f"    {c.doc_type.ljust(width)}  score {c.score:.2f}  coverage {c.coverage:.2f}  "
+                     f"precision {c.precision:.2f}  found {c.found}/{c.total}"
+                     + (f"  [{found}]" if found else ""))
+    lines.extend(f"  warning: {w}" for w in d.warnings)
+    return lines
+
+
 def _table(result: ExtractionResult, label: str) -> str:
     lines = [f"{label}  [{result.doc_type}]"]
+    if result.detection is not None:
+        lines.extend(_detection_lines(result.detection))
     width = max((len(n) for n in result.fields), default=0)
     for name, f in result.fields.items():
         value = "(missing)" if f.value is None else str(f.value)
@@ -70,7 +99,10 @@ def extract(
     images: list[Path] = typer.Argument(
         ..., help="Image or PDF file(s) to read. A PDF or multi-page TIFF is one document."
     ),
-    doc_type: Optional[str] = typer.Option(None, "--type", "-t", help="Document type name (see `dococr types`) or a YAML file."),
+    doc_type: Optional[str] = typer.Option(
+        None, "--type", "-t",
+        help="Document type name (see `dococr types`) or a YAML file. Omitted or 'auto': detect it.",
+    ),
     fields: Optional[str] = typer.Option(
         None, "--fields", "-f", help="Comma-separated field names. Default: all fields of the type."
     ),
@@ -78,6 +110,7 @@ def extract(
         None, "--doc-type-file", help="YAML file describing a document type."
     ),
     types_dir: Optional[list[Path]] = _TYPES_DIR,
+    candidates: Optional[str] = _CANDIDATES,
     output_format: Format = typer.Option(Format.json, "--format", help="json or table."),
     raw_text: bool = typer.Option(False, "--raw-text", help="Include the full text read off the page."),
     one_document: bool = typer.Option(
@@ -96,19 +129,21 @@ def extract(
         "always (as it is, even an invisible scanner's layer), never (OCR every page).",
     ),
 ) -> None:
-    """Extract fields from one or more document images or PDFs. Runs fully offline."""
+    """Extract fields from one or more document images or PDFs. Runs fully offline.
+
+    Without --type (or with --type auto) the document type is detected first; a document that
+    is none of the candidate types is an error, and the ranking is printed."""
+    doc = None
     if doc_type_file is not None:
         try:
             doc = load_doc_type_file(doc_type_file)
         except Exception as exc:
             raise _fail(str(exc))
-    elif doc_type:
+    elif doc_type and not is_auto(doc_type):
         try:
             doc = load_doc_type(doc_type, types_dir)
         except Exception as exc:  # --type also accepts a YAML path
             raise _fail(str(exc))
-    else:
-        raise _fail("give --type or --doc-type-file")
     wanted = [f.strip() for f in fields.split(",") if f.strip()] if fields else None
 
     for path in images:
@@ -122,9 +157,16 @@ def extract(
         source = group[0] if len(group) == 1 else group
         try:
             results.append(
-                pipeline.extract(source, doc, wanted, include_raw_text=raw_text, max_pages=max_pages,
-                                 pdf_text=pdf_text.value)
+                pipeline.extract(source, doc if doc is not None else "auto", wanted,
+                                 include_raw_text=raw_text, max_pages=max_pages,
+                                 pdf_text=pdf_text.value, candidates=_names(candidates),
+                                 dirs=types_dir)
             )
+        except UnknownDocumentError as exc:
+            if len(groups) > 1:
+                typer.echo(label, err=True)
+            typer.echo("\n".join(_detection_lines(exc.detection)), err=True)
+            raise _fail(f"{label}: {exc}")
         except ExtractorError as exc:
             raise _fail(str(exc))
         except SourceError as exc:
@@ -138,6 +180,50 @@ def extract(
         typer.echo("\n\n".join(_table(r, label) for r, label in zip(results, labels)))
         return
     payload = [r.model_dump(mode="json") for r in results]
+    typer.echo(json.dumps(payload[0] if len(payload) == 1 else payload, indent=2, ensure_ascii=False))
+
+
+@app.command()
+def detect(
+    images: list[Path] = typer.Argument(..., help="Image or PDF file(s) to identify."),
+    types_dir: Optional[list[Path]] = _TYPES_DIR,
+    candidates: Optional[str] = _CANDIDATES,
+    output_format: Format = typer.Option(Format.table, "--format", help="table or json."),
+    one_document: bool = typer.Option(
+        False, "--one-document",
+        help="Treat the given files as the pages of ONE document, in order.",
+    ),
+    max_pages: int = typer.Option(
+        DEFAULT_MAX_PAGES, "--max-pages", min=1, help="Refuse a document with more pages than this."
+    ),
+    pdf_text: PdfText = typer.Option(PdfText.auto, "--pdf-text", help="auto, always or never (see extract)."),
+) -> None:
+    """Say which document type each file is, with the ranking and the evidence. Extracts nothing.
+
+    A document that is none of the candidates is reported as unknown (exit code 0)."""
+    for path in images:
+        if not path.is_file():
+            raise _fail(f"no such file: {path}")
+    groups = [list(images)] if one_document else [[p] for p in images]
+    labels = [" + ".join(str(p) for p in g) for g in groups]
+    found = []
+    for group, label in zip(groups, labels):
+        source = group[0] if len(group) == 1 else group
+        try:
+            found.append(pipeline.detect(source, _names(candidates), max_pages=max_pages,
+                                         pdf_text=pdf_text.value, dirs=types_dir))
+        except ExtractorError as exc:
+            raise _fail(str(exc))
+        except SourceError as exc:
+            raise _fail(f"{label}: {exc}")
+        except ValueError as exc:
+            raise _fail(str(exc))
+        except Exception as exc:  # unreadable / corrupt image
+            raise _fail(f"cannot process {label}: {exc}")
+    if output_format is Format.table:
+        typer.echo("\n\n".join("\n".join([label, *_detection_lines(d)]) for d, label in zip(found, labels)))
+        return
+    payload = [d.model_dump(mode="json") for d in found]
     typer.echo(json.dumps(payload[0] if len(payload) == 1 else payload, indent=2, ensure_ascii=False))
 
 
