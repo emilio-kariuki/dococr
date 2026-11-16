@@ -46,6 +46,7 @@ system Python is 3.10, which cannot install the fixed Pillow 13). Use the virtua
 .venv/bin/python tests/local/eval_synth.py --types synth_form,synth_agreement --seeds 5   # multi-line and prose fixtures
 .venv/bin/python tests/local/eval_synth.py --types synth_contract --seeds 5               # typeset prose: hyphens, punctuation ends, number words
 .venv/bin/python tests/local/eval_synth.py --types synth_glued --seeds 5                  # words run together next to anchors
+.venv/bin/python tests/local/eval_detect.py --seeds 3             # document type detection: confusion matrix and unknowns
 .venv/bin/python tests/local/eval_pdf.py --seeds 5               # multi-page PDFs: text layer, OCR layer, image-only, page breaks
 .venv/bin/python tests/local/bench.py --reps 5                  # per-stage timings, wall and CPU (--pdf for PDFs)
 
@@ -81,6 +82,12 @@ doc.image.save('/tmp/logbook.jpg'); print(doc.truth)"
 | HTTP service | `src/dococr/api.py` | `tests/test_api.py` |
 
 ## Contracts to keep
+
+- `Extractor` may also implement `read_page` and `match_page`; detection needs both and must never
+  read a page twice. Keep `extract` equivalent to `match_page(read_page(...))`.
+- Detection thresholds in `detection.py` were chosen from measured gaps. After changing them, or
+  the scoring, rerun `tests/local/eval_detect.py` and check that unrelated documents still come
+  back unknown.
 
 - `Extractor.extract` returns exactly one `FieldResult` per requested field, in request order. It
   fills `raw`, `confidence`, `bbox`, `warnings`. It does not set `value`; the pipeline does.

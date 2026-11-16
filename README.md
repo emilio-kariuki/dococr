@@ -71,6 +71,8 @@ installing it into a clean environment and running it with no network interfaces
 ## Command line
 
 ```bash
+dococr extract photo.jpg                  # work out the document type, then extract every field
+dococr detect photo.jpg                   # only say which type it is, with the evidence
 dococr types                              # every document type it can find
 dococr fields logbook                     # a type's fields, their kind, and the labels they match
 dococr extract photo.jpg --type logbook --fields registration_number,owner_name
@@ -210,6 +212,7 @@ A found field also has `"page"`, the page its value came from (`1` for a single 
 | `backend` | Always `local`. |
 | `fields.<name>.page` | The page the value came from, counting from 1. `null` when not found. |
 | `pages` | How many pages were read. |
+| `detection` | Only when the type was detected rather than named: the chosen type, its score, the runner-up's score, the reason, and every candidate with the labels found for it. `null` when you named the type. |
 | `elapsed_ms` | Time taken for the whole document. |
 
 These are extraction results, not verified data. Check by eye anything that matters.
@@ -271,6 +274,7 @@ curl -F file=@logbook.jpg -F doc_type=logbook -F fields=registration_number,owne
 | Endpoint | |
 |---|---|
 | `POST /extract` | Multipart form: `file` (an image or a PDF; send several `file` parts for the pages of one document, in order), `doc_type` (a name), optional `fields` (comma-separated, or a JSON list), optional `include_raw_text` (`true`/`false`). Returns the JSON shown under [Output](#output). |
+| `POST /detect` | Multipart form: `file`, optional `candidates`. Returns which type the document is, with the evidence; see [Detecting the document type](#detecting-the-document-type). |
 | `GET /doc-types` | Every document type found, including those in your own folder. |
 | `GET /doc-types/{name}` | One type with its fields. |
 | `GET /health` | `{"status": "ok"}` |
@@ -358,6 +362,57 @@ fields, the labels printed next to them, and the other text on the page. Nothing
 particular document is written into the code, so supporting a new document never needs a code
 change.
 
+### Detecting the document type
+
+Leave out the type and dococr works it out from the YAML files it knows, then extracts:
+
+```bash
+dococr extract photo.jpg                           # detect, then extract
+dococr extract photo.jpg --candidates logbook,national_id   # choose only among these
+dococr detect photo.jpg                            # just the answer and the evidence
+```
+
+```python
+from dococr import UnknownDocumentError, detect, extract
+
+result = extract("photo.jpg")                      # same as doc_type="auto"
+result.doc_type                                    # "logbook"
+result.detection.score                             # how clearly it won
+
+try:
+    extract("unrelated.pdf")
+except UnknownDocumentError as exc:
+    print(exc.detection.candidates[0].doc_type)    # the closest type, which was not close enough
+```
+
+Over HTTP, leave `doc_type` empty or set it to `auto` on `POST /extract`; `POST /detect` only
+answers which type it is.
+
+**How it decides.** The page is read once. Each candidate type is scored by how many of the labels
+and texts in its YAML are found on the page, giving more weight to labels only that type has
+(`Chassis No`) than to ones every type has (`Date of Birth`), and less to a type whose labels
+explain little of what was found. Then the page is extracted with the winner from the same
+reading, so detection adds only tens of milliseconds.
+
+**It refuses rather than guesses.** The answer is "unknown" when the best type scores too low,
+when fewer than three of its labels are found, or when two types score close together. For
+`extract` that raises `UnknownDocumentError` (HTTP 422, with the ranking); `detect` returns
+the ranking with no type. Expect it for:
+
+- documents you have no YAML for, which is the point;
+- **two of your types with the same labels**: give them different `identifying_text`;
+- a cropped photo that shows only a few labels: name the type instead.
+
+The first five pages of a document are used for detection. At most 50 candidate types are scored
+per request (`DOCOCR_MAX_CANDIDATES`). The name `auto` is reserved and cannot be a document type.
+
+**Measured.** 243 of 243 synthetic pages of ten types detected correctly with no wrong answer;
+123 of 123 pages of other types, and 24 of 24 real public agreements, correctly returned as
+unknown against the included types. Three real Kenyan documents (an ID, a birth certificate, a
+logbook) were each detected correctly, and the 24 agreements were each detected as their own
+family once their YAML was added. The ID, driving licence and passport `identifying_text` are
+best guesses, not yet checked against real documents.
+
 ### Where the YAML files are
 
 | Place | How it is used |
@@ -416,6 +471,7 @@ Keys for the document:
 | `title`, `description` | For people. `dococr types` shows the title. |
 | `aliases` | Other names the type can be asked for by. |
 | `date_order` | `day_first` (default) or `month_first`, for numeric dates such as `12/05/08`. Set it for documents that write dates the American way. Can also be set on a single field. |
+| `identifying_text` | Text the document prints that identifies it, such as its heading (`Certificate of Birth`, `Registration Certificate`). Used only to [detect the type](#detecting-the-document-type); never extracted. |
 | `page_furniture` | Text printed on a page that is not part of the document's content and that dococr should skip when a value continues onto the next page, such as `Continued overleaf`. Repeated headers, footers and page numbers are found without it. |
 | `other_labels` | Labels printed on the document that you do not want extracted, such as a signature line. They are never returned. They tell dococr where a neighbouring value ends, so list them when a value picks up text that belongs to something else. |
 | `fields` | The list of fields. |

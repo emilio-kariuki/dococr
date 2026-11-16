@@ -578,6 +578,7 @@ Found by attacking a running service; each has a regression test in `tests/test_
 | 20,000 characters per PDF page, else the page is OCR'd | `pdftext.MAX_PAGE_CHARS` | A 376 KB page of microscopic text cost 21 s in the matcher. |
 | 2,000 characters for a `date`, `integer` or `number` value | `normalize.MAX_TYPED_LENGTH` | 65,000 characters of glued number words took 4.5 s to parse. |
 | No unbounded repeat inside an unbounded repeat in `pattern` | `models._nested_unbounded_repeat` | `(a+)+$` did not finish on 31 characters. |
+| 50 candidate types per detection (`DOCOCR_MAX_CANDIDATES`) | `detection` | A folder of thousands of YAML files would otherwise make every request slow. |
 | 2 extractions at once (`DOCOCR_MAX_CONCURRENT`), 30 s wait, then 503 | `api._extract_slots` | Each extraction holds decoded pages; the thread pool would otherwise run 40. |
 | 100 connections, 10 s shutdown deadline | `cli.serve` (uvicorn) | Idle connections were unbounded, and a running extraction blocked shutdown. |
 | 200 field names, 200 characters per name, 20,000 characters of `fields` | `api._parse_fields` | Deeply nested JSON raised an unhandled `RecursionError`. |
@@ -788,6 +789,52 @@ prints `Registration`, `Make of Vehicle` and `Owner's Name` (a header with the v
 has a dozen labels the first version did not list. Before the correction three fields came back
 wrong without a warning; after it, 26 of 26 filled fields were right and 4 blanks missing. The
 `driving_license` and `passport` files have still not been checked against real documents.
+
+## Detecting the document type (`detection.py`)
+
+**Read once.** `Extractor` has two optional methods, `read_page(image, text_layer=None) ->
+PageRead` (lines, page size, box mapper, page notes) and `match_page(page, doc_type, fields)`;
+`supports_reading` is true when both are overridden. `LocalExtractor.extract` is
+`match_page(read_page(...))`. With `doc_type="auto"` the pipeline reads each page once, scores
+every candidate on those lines, and extracts with the winner from the same lines. A custom
+extractor that only implements `extract` works with a named type and gets a `ValueError` for
+auto. A slow test checks the page is read once and that the result equals a named extraction.
+
+**Evidence** comes only from the YAML: field labels and aliases, `until` labels and end texts,
+`other_labels`, `identifying_text`, and the title when it is more than the name. Phrases are
+searched once per page for all candidates with the matcher's own functions (row labels including
+stacked ones; reading order for phrases of two or more words, or one word of six or more
+characters). Single short words are never evidence.
+
+**Score.** A phrase's weight is `log((N+1)/n) / log(N+1)` for N candidates of which n list it.
+Each field is one unit whatever its aliases. Coverage is the weighted share of a type's units
+found; precision is the weighted share of everything found that the type lists; the score is
+their harmonic mean.
+
+**Refusal.** Unknown when the best score is below `MIN_SCORE` (0.38), the best type has fewer
+than `MIN_FOUND` (3) phrases found, or another type scores more than `MAX_RUNNER_UP` (0.80) of the
+best, unless the best dominates it (every phrase found for the other is also the best's, and the
+best has one the other lacks). The thresholds sit in measured gaps: correct types scored at least
+0.499 on synthetic and 0.516 on real pages, the best wrong candidate at most 0.267 and 0.241; the
+highest wrong-to-right ratio on synthetic pages was 0.69. Dominance exists because two real
+families differing in one label scored 0.85 to 0.87 of each other.
+
+**Bounds.** Evidence is pooled over the first `DETECT_PAGES` (5) pages: with 3, six of fourteen
+real documents whose identifying schedule is on page 4 or 5 were unknown. At most
+`DOCOCR_MAX_CANDIDATES` (50) types are scored; more is an error, never a silent cut. A pre-filter
+skips phrases that cannot match the page (no change on 434 pages). Matching costs about 0.01 s for
+10 types and 0.2 to 0.8 s for 50 near-duplicate types on a dense page.
+
+**Measured** (`tests/local/eval_detect.py`; real documents by a scratch harness): synthetic
+confusion matrix 243 of 243 with ten candidate types, also with identifying text removed; 123 of
+123 other-type pages and 24 of 24 public agreements unknown against the shipped types; the three
+real Kenyan documents detected correctly (scores 0.58, 0.92, 0.91; runners-up 0.19 or less); each
+agreement detected as its own family once its YAML was a candidate.
+
+**Risks.** Two types with the same labels always come back unknown; dominance decides close cases
+on one phrase, so an OCR misreading of exactly that phrase could mislead it; a partial page of a
+type with a long YAML may score too low; adding a candidate changes the others' weights.
+"Republic of Kenya" is deliberately listed on every shipped type so that it carries no weight.
 
 ## Possible next steps
 
