@@ -151,7 +151,9 @@ def test_warm_up_loads_all_models():
 
 # ---------------------------------------------------------------------------- multi-line and prose fixtures
 
-FIXTURE_FLOOR = {"synth_form": 0.9, "synth_agreement": 0.8, "synth_contract": 0.8, "synth_glued": 0.8}
+# synth_ruled: blur_lowres loses spaces inside values ("K.M.MUTUA"), 19 of 22 on seeds 0 and 1.
+FIXTURE_FLOOR = {"synth_form": 0.9, "synth_agreement": 0.8, "synth_contract": 0.8, "synth_glued": 0.8,
+                 "synth_ruled": 0.85}
 
 
 @pytest.mark.parametrize("doc_type,variant", [(t, v) for t in FIXTURE_TYPES for v in variants_for(t)])

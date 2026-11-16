@@ -1,0 +1,38 @@
+# Test fixture, not a shipped preset: a made-up ruled form rendered by tests/synth.py. Its labels
+# are printed on two or three short lines inside table cells, and its first line is a fill-in
+# line ("Enrolled in the .... X .... Ward of the .... Y .... County").
+name: synth_ruled
+title: Synthetic ruled enrolment record
+description: Made-up ruled form used to test labels stacked over several lines and fill-in lines.
+fields:
+  - name: ward
+    label: Enrolled in the
+    until: Ward of the
+  - name: county
+    label: Ward of the
+    until: County
+  - name: enrolment_number
+    label: Enrolment No.
+    type: identifier
+    pattern: '\d{6}/\d{2}'
+  - name: place_of_enrolment
+    label: Place of Enrolment
+  - name: name
+    label: Name
+    type: name
+  - name: date_of_enrolment
+    label: Date of Enrolment
+    type: date
+  - name: sex
+    label: Sex
+  - name: guardian_name
+    label: Name and Surname of Guardian
+    type: name
+  - name: school
+    label: Name of School Attended
+  - name: enrolling_officer
+    label: Name of Enrolling Officer
+    type: name
+  - name: date_of_registration
+    label: Date of Registration
+    type: date

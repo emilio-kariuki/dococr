@@ -4,13 +4,14 @@ Draws label/value layouts that resemble driving licences, national IDs, logbooks
 passport data pages with Pillow, using made-up data only. Each rendered document carries the
 expected normalised value of every field (None for fields deliberately left off the page).
 
-Four further made-up types are fixtures for multi-line and prose values (`FIXTURE_TYPES`, YAML
+Five further made-up types are fixtures for multi-line, prose and ruled-form values (`FIXTURE_TYPES`, YAML
 in tests/doctypes/): `synth_form`, a form with a wrapped name and an address block,
 `synth_agreement`, paragraphs of running text with the values inside sentences, and
 `synth_contract`, typeset paragraphs: words hyphenated at line ends (inside labels, end texts and
 values), values that end at a comma or a full stop, and amounts and dates in words, and
 `synth_glued`, typeset paragraphs in which the space between a label or end text and its
-neighbour is left out on purpose, as OCR often loses it.
+neighbour is left out on purpose, as OCR often loses it, and `synth_ruled`, a ruled form whose
+labels are printed on two or three short lines in their cells, with a fill-in line above.
 
     from tests.synth import make_document, VARIANTS
     doc = make_document("driving_license", "clean", seed=0)
@@ -706,6 +707,163 @@ def make_glued_document(variant: str = "clean", seed: int = 0) -> SynthDoc:
     return doc
 
 
+# ---------------------------------------------------------------------------- ruled form, stacked labels
+
+SCHOOL_KINDS = ["PRIMARY SCHOOL", "ACADEMY", "MIXED DAY SCHOOL", "GIRLS SCHOOL"]
+CENTRES = ["HEALTH CENTRE", "DISPENSARY", "SOCIAL HALL", "CHIEF'S OFFICE"]
+
+
+@dataclass
+class Cell:
+    field: str
+    label: list[str]  # the label's printed lines
+    value: str  # printed value
+    expected: object
+    width: int  # label cell width; the value cell takes the rest of its share of the row
+    place: str = "middle"  # top | middle | bottom | joined (one OCR box with the last label line) | below
+
+
+def ruled_for(rng: random.Random) -> tuple[list[list[Cell]], list[tuple[str, str, object]], dict[str, object]]:
+    """(rows of cells, the fill-in line's two entries (field, printed, expected), truth). The
+    values are made up; the labels are those of tests/doctypes/synth_ruled.yaml."""
+    first, last = rng.choice(FIRST), rng.choice(LAST)
+    name = f"{first.title()} {last.title()}" if rng.random() < 0.5 else f"{first} {last}"
+    enrol = rand_date(rng, 1995, 2015)
+    reg = enrol + dt.timedelta(days=rng.randint(3, 60))
+    struck = rng.random() < 0.25  # the guardian's entry is struck out with a row of x
+    guardian = "X" * rng.randint(12, 24) if struck else f"{rng.choice(FIRST)} {rng.choice(LAST)}"
+    officer = f"{letters(rng, 1)}.{letters(rng, 1)}. {rng.choice(LAST)}"
+    centre = f"{rng.choice(PLACES)} {rng.choice(CENTRES)}"
+    school = f"{rng.choice(PLACES)} {rng.choice(SCHOOL_KINDS)}"
+    number = f"{digits(rng, 6)}/{digits(rng, 2)}"
+    guardian_label = rng.choice([["Name and Surname", "of Guardian"], ["Name and", "Surname of", "Guardian"]])
+    d1 = fmt_date(enrol, rng.choice(["dot", "slash", "dash_mon", "space_mon"]))
+    d2 = fmt_date(reg, rng.choice(["dot", "slash", "dash_mon", "space_mon"]))
+    rows = [
+        [Cell("enrolment_number", ["Enrolment", "No."], number, number, 170),
+         Cell("place_of_enrolment", ["Place of", "Enrolment"], centre, centre, 150),
+         Cell("name", ["Name"], name, name, 100)],
+        [Cell("date_of_enrolment", ["Date of", "Enrolment"], d1, enrol.isoformat(), 150),
+         Cell("sex", ["Sex"], sx := rng.choice(["Male", "Female"]), sx, 80),
+         Cell("guardian_name", guardian_label, guardian, None if struck else guardian, 230)],
+        [Cell("school", ["Name of School", "Attended"], school, school, 230)],
+        [Cell("enrolling_officer", ["Name of", "Enrolling Officer"], officer, officer, 230),
+         Cell("date_of_registration", ["Date of", "Registration"], d2, reg.isoformat(), 170)],
+    ]
+    for row in rows:
+        for c in row:
+            if len(c.label) > 1:
+                c.place = rng.choices(["top", "middle", "bottom", "joined", "below"], [3, 3, 3, 2, 1])[0]
+    ward, county = rng.choice(PLACES), rng.choice(PLACES)
+    fill = [("ward", ward, ward), ("county", county, county)]
+    truth = {c.field: c.expected for row in rows for c in row}
+    truth.update({f: e for f, _, e in fill})
+    return rows, fill, truth
+
+
+def layout_ruled(rows: list[list[Cell]], fill: list[tuple[str, str, object]], rng: random.Random,
+                 pitch_ratio: float, centred: bool) -> Image.Image:
+    """A ruled grid: each label in its cell on one to three short lines, `pitch_ratio` x the
+    font size apart (under 1.0 the lines' boxes overlap, as on many printed forms), and its
+    value in the next cell, level with the label's first line, its middle, its last line, in
+    one OCR box with the last line (a single space after it, no rule between), or under the
+    label. Above the grid, a fill-in line with dotted blanks."""
+    width = 1800
+    size = rng.choice([20, 22, 24])
+    lf = font(rng.choice(["sans", "serif"]), size)
+    vf = font(rng.choice(["sans-bold", "serif-bold", "mono"]), size + rng.choice([0, 2]))
+    pitch = int(size * pitch_ratio)
+    pad = 14
+    heights = []
+    for row in rows:
+        h = 0
+        for c in row:
+            body = len(c.label) * pitch + (pitch + 6 if c.place == "below" else 0)
+            h = max(h, body)
+        heights.append(h + 2 * pad + 6)
+    top = 190
+    img = Image.new("RGB", (width, top + sum(heights) + 60), rng.choice([(255, 255, 255), (246, 244, 236)]))
+    d = ImageDraw.Draw(img)
+    ink, rule = (20, 20, 20), (60, 60, 60)
+    d.text((width // 2, 30), "REPUBLIC OF ATLANTIS", font=font("serif-bold", 26), fill=ink, anchor="mt")
+    d.text((width // 2, 70), "RECORD OF ENROLMENT", font=font("serif-bold", 30), fill=ink, anchor="mt")
+
+    # Fill-in line: printed words, a dotted blank with the entry, printed words, ...
+    y = 130
+    x = 60
+    printed = ["Enrolled in the", "Ward of the", "County"]
+    glue = rng.random() < 0.5  # leader dots touching the next printed word ("..County")
+    for k, words in enumerate(printed):
+        text = (".." + words) if glue and k == 2 else words
+        d.text((x, y), text, font=lf, fill=ink)
+        x += int(d.textlength(text, font=lf)) + 30
+        if k < len(fill):
+            blank = rng.randint(300, 380)
+            for dx in range(x, x + blank, 9):
+                d.ellipse([dx, y + size + 2, dx + 2, y + size + 4], fill=rule)
+            entry = fill[k][1]
+            ew = d.textlength(entry, font=vf)
+            d.text((x + (blank - ew) / 2, y - 2), entry, font=vf, fill=ink)
+            x += blank + 30
+
+    y = top
+    d.line([40, y, width - 40, y], fill=rule, width=2)
+    for row, rh in zip(rows, heights):
+        share = (width - 80) // len(row)
+        x0 = 40
+        for c in row:
+            lw = c.width
+            d.line([x0, y, x0, y + rh], fill=rule, width=2)
+            block_h = (len(c.label) - 1) * pitch + size
+            ly = y + pad
+            line_w = [d.textlength(t, font=lf) for t in c.label]
+            for k, t in enumerate(c.label):
+                lx = x0 + (lw - line_w[k]) / 2 if centred else x0 + 10
+                d.text((lx, ly + k * pitch), t, font=lf, fill=ink)
+            vx = x0 + lw + 14
+            if c.place == "joined":
+                last_x = x0 + (lw - line_w[-1]) / 2 if centred else x0 + 10
+                vx = last_x + line_w[-1] + d.textlength(" ", font=lf)
+                vy = ly + (len(c.label) - 1) * pitch
+                d.text((vx, vy), c.value, font=vf, fill=ink)
+            elif c.place == "below":
+                d.line([x0 + lw, y, x0 + lw, y + rh], fill=rule, width=1)
+                d.text((x0 + 10, ly + len(c.label) * pitch + 6), c.value, font=vf, fill=ink)
+            else:
+                d.line([x0 + lw, y, x0 + lw, y + rh], fill=rule, width=1)
+                vy = {"top": ly, "bottom": ly + block_h - size,
+                      "middle": ly + (block_h - size) / 2}[c.place]
+                d.text((vx, vy - 1), c.value, font=vf, fill=ink)
+            x0 += share
+        d.line([width - 40, y, width - 40, y + rh], fill=rule, width=2)
+        y += rh
+        d.line([40, y, width - 40, y], fill=rule, width=2)
+    return img
+
+
+# Ruled form: (label line pitch as a share of the font size, centred labels, degradation)
+RULED_VARIANTS: dict[str, tuple[float, bool, Callable[[Image.Image, random.Random], Image.Image]]] = {
+    "clean": (1.15, True, lambda im, r: im),
+    "tight": (0.95, True, lambda im, r: im),
+    "left": (1.15, False, lambda im, r: im),
+    "skew": (1.1, True, lambda im, r: rotate(im, r.choice([-3, -1.5, 1.5, 3]))),
+    "rot90": (1.1, True, lambda im, r: rotate(im, 90)),
+    "blur_lowres": (1.1, True, lambda im, r: blur_lowres(im)),
+    "photo": (1.0, True, lambda im, r: photo(rotate(im, r.choice([-1.5, 1.5])), r)),
+}
+
+
+def make_ruled_document(variant: str = "clean", seed: int = 0) -> SynthDoc:
+    rng = random.Random(f"synth_ruled/{variant}/{seed}")
+    rows, fill, truth = ruled_for(random.Random(f"synth_ruled/{seed}"))
+    pitch_ratio, centred, degrade = RULED_VARIANTS[variant]
+    img = degrade(layout_ruled(rows, fill, rng, pitch_ratio, centred), rng)
+    doc = SynthDoc("synth_ruled", variant, seed, img, truth)
+    doc.printed = {c.field: c.value for row in rows for c in row} | {f: p for f, p, _ in fill}
+    doc.labels = {c.field: " ".join(c.label) for row in rows for c in row}
+    return doc
+
+
 # ---------------------------------------------------------------------------- degradations
 
 def to_jpeg(img: Image.Image, quality: int) -> Image.Image:
@@ -796,7 +954,7 @@ DOC_TYPES = ["driving_license", "national_id", "logbook", "passport"]
 # presets: their YAML files are in tests/doctypes/, and `doc_type_ref` gives the path to pass to
 # `extract`.
 FIXTURE_DIR = Path(__file__).resolve().parent / "doctypes"
-FIXTURE_TYPES = ["synth_form", "synth_agreement", "synth_contract", "synth_glued"]
+FIXTURE_TYPES = ["synth_form", "synth_agreement", "synth_contract", "synth_glued", "synth_ruled"]
 PROSE_TYPES = ["synth_agreement", "synth_contract", "synth_glued"]
 # Prose: (page width, line spacing) and the degradation. Form layouts do not apply.
 PROSE_VARIANTS: dict[str, tuple[Optional[tuple[int, int]], float, Callable[[Image.Image, random.Random], Image.Image]]] = {
@@ -812,6 +970,8 @@ PROSE_VARIANTS: dict[str, tuple[Optional[tuple[int, int]], float, Callable[[Imag
 
 
 def variants_for(doc_type: str) -> list[str]:
+    if doc_type == "synth_ruled":
+        return list(RULED_VARIANTS)
     return list(PROSE_VARIANTS) if doc_type in PROSE_TYPES else list(VARIANTS)
 
 
@@ -837,6 +997,8 @@ def make_document(doc_type: str, variant: str = "clean", seed: int = 0, style: O
         return make_contract_document(variant, seed)
     if doc_type == "synth_glued":
         return make_glued_document(variant, seed)
+    if doc_type == "synth_ruled":
+        return make_ruled_document(variant, seed)
     rng = random.Random(f"{doc_type}/{variant}/{seed}")
     items_rng = random.Random(f"{doc_type}/{seed}")
     if style is None:

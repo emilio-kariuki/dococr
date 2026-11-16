@@ -13,8 +13,17 @@ How it works
    ("DateofBirth12.03.1990") is split. When the type has `until` fields, so is a word that
    glues the last word of their labels, or the first word of their end texts, to a value
    containing a digit ("numberJSX956", "123Achassis"). Other glued prose anchors are matched
-   inside the word without splitting it here (see "Glued anchors" in step 4).
+   inside the word without splitting it here (see "Glued anchors" in step 4). So is a word
+   that glues the last word of a label of two or more words to a value starting with a figure,
+   after a full stop or, for a word of five letters or more, directly ("No.687860/36",
+   "Registration12.03.2001") at the start of an OCR box: the last line of a stacked label read
+   in one box with its value (`_split_label_tail`). A run of two or
+   more leader dots or rules ("......KIAMBU......", "..Province") is a separator token of its
+   own, so it does not hide a label or end text and is not part of a value.
 2. Lines are grouped into rows by vertical overlap; each row's words are sorted left to right.
+   A line that overlaps a member of a row horizontally while its centre is offset vertically
+   (STACK_OFFSET) sits under or over it, not beside it, and is not put in that row: the two
+   lines of a label in a table cell are often closer than one text height (`_stacked`).
 3. Label search. The vocabulary is the `label` and `aliases` of every field of the doc type
    and of the requested (possibly ad-hoc) fields, plus the doc type's `other_labels`, which
    never produce values and serve only as competitors and stop boundaries. No other label
@@ -27,11 +36,31 @@ How it works
      - or as a joined string when OCR split/merged words ("LicenceNo"), with at most one edit,
        which may not be a whole word of one letter added or dropped ("A Price per Share" is not
        "Price per Share", so the "A" of "Series A" before a label or end text stays in the value).
+   Stacked labels (`find_stacked_hits`): a label of two or more words may be printed on two
+   or three short lines of one cell ("Date of" above "Birth"). Its words are the whole of each
+   OCR box but the last and the start of the last box (the value may follow in that box). Each
+   line is directly below the one before (centres 0.5 to STACK_PITCH text heights apart, at
+   most STACK_GAP of blank between, similar text height) and aligned with it on the left, the
+   right or the centre (STACK_ALIGN). A box with other text after the label's words cannot be
+   an upper line, so "Name: JOHN" above "Surname: DOE" is not "Name Surname", and lines of
+   running text are not joined.
    Overlapping hits are resolved by covered label length x quality, so a longer label beats
-   a shorter one inside it ("National ID No" beats "ID No").
+   a shorter one inside it ("National ID No" beats "ID No"), also across the lines of a stacked
+   label: "Name" cannot take a word of "Name of / Registering Officer". A stacked label each of
+   whose lines has text of its own to the right is two rows of the form ("BODY  SALOON" above
+   "COLOUR  WHITE" while "Body Colour" is a label): it is dropped and the overlaps resolved
+   again (`_rows_of_their_own`), and the field is told why if it ends without a value. A
+   stacked label whose lines are each a label on their own, one of another field, is kept
+   with a warning ("Entry" above "No.", or "Body" above "Colour": the page cannot tell).
+   A single-line hit followed in its own OCR box by the next word of a longer label that
+   starts with it ("Name" in a box "Name of", when "Name of Registering Officer" is a label)
+   is a piece of that label (`_longer_label`): it still bounds other values but gives none.
 4. For each hit, value candidates are the words to the right in the same row (up to the next
    label hit, a ':' or a wide gap) and the nearest line directly below (within the label's
-   column, up to the next label). Candidates are scored by
+   column, up to the next label). For a stacked label: the words to the right of each of its
+   lines (the value may be level with any line, or between two, which puts it on the row of
+   one of them), and below its last line in a column as wide as the label (`_value_places`).
+   Candidates are scored by
    OCR confidence x label quality x geometry x type plausibility (the field's declared `type`:
    dates must parse, numbers need digits; and its `pattern` must match) and trimmed to the
    date / pattern match when one exists. A field's type is only ever its declared `type`.
@@ -55,6 +84,10 @@ How it works
    line to the start of the next. Short words match exactly but need not start an OCR box.
    A word without letters does not start an anchor whose first word has letters ("7 situated
    in" is not "situated in").
+   Fill-in lines ("Birth in the ....KIAMBU.... District in the ....CENTRAL.... Province"): when
+   the label ends its segment and a word end text starts a later segment on the same row, with
+   at least one word between, the value is the segments between them (`_along_row`). This is
+   tried first; otherwise the field is read in sentence order as below.
    The value is the text after the label up to the first match of an `until` text, which
    must come within MAX_FLOW_WORDS words and MAX_FLOW_LINES lines (else no value, except that
    a date / `pattern` field accepts a match that starts right after the label, with reduced
@@ -114,10 +147,14 @@ How it works
 6. A requested field left without a value (label not found, nothing beside the label, or its
    value taken by another field) falls back to a page-wide `pattern` search; this is used only
    when exactly one distinct value matches, and with reduced confidence.
-7. Weak matches are rejected (raw=None + warning) rather than returned confidently.
+7. Weak matches are rejected (raw=None + warning) rather than returned confidently. So is a
+   value that is a row of one mark ("XXXXXXXX", "--------"), which strikes out a blank
+   (`_filler`).
 
 Fields that set neither `multiline` nor `until` go through exactly steps 1 to 7 as before,
-except that an `integer` or `number` value written in words now fits its type.
+except that an `integer` or `number` value written in words now fits its type, and that the
+ruled-form rules above (leaders, stacked lines kept out of one row, stacked labels, pieces of
+longer labels, rows of one mark) apply to every field.
 
 Each FieldMatch also says where its text came from: the OCR line and box of every piece of the
 value (`parts`) and the OCR lines of its label and end text (`anchor_lines`). `dococr.pagebreak`
@@ -178,6 +215,7 @@ class Word:
     sidx: int = -1  # index within the segment
     alpha: bool = False  # has a letter
     gap: bool = True  # preceded by white space (or the start of its OCR line)
+    lead: bool = False  # the first word of its OCR box (only separators, such as leader dots, before it)
     parts: tuple = ()  # the OCR words this word was made from (a hyphenated word, a trimmed word)
     span: Optional[tuple[int, int]] = None  # for a piece of one OCR word: its char range in parts[0]
     cuts: Optional[tuple] = field(default=None, init=False, repr=False, compare=False)  # `_cuts` cache
@@ -215,10 +253,23 @@ class Hit:
     variant: Variant
     score: float
     box: Box
+    # A label printed on several lines of one cell (`find_stacked_hits`): (row, start, end) of
+    # each line's words, top first. row/start/end are then those of the first line, and `box`
+    # covers all of them.
+    parts: tuple[tuple[int, int, int], ...] = ()
+    # The label is only the start of a longer label whose next words follow it in the same OCR
+    # box ("Name" in "Name of" when "Name of Mother" is a label): it gives no value.
+    fragment_of: Optional[Variant] = None
+    # For a stacked label: its lines when each is also a label on its own, one of another field.
+    lone: tuple[str, ...] = ()
 
     @property
     def weight(self) -> float:
         return self.score * len(self.variant.joined)
+
+    def cells(self) -> set[tuple[int, int]]:
+        return {(r, k) for r, s, e in (self.parts or ((self.row, self.start, self.end),))
+                for k in range(s, e)}
 
 
 @dataclass(frozen=True)
@@ -324,6 +375,24 @@ def build_vocabulary(doc_type: DocType, fields: list[FieldSpec]) -> list[Variant
 # A colon is a token of its own ("Name:JOHN" is three tokens), except between two figures, where
 # it is part of a time or ratio ("9:00", "10:30:15") and stays inside the word.
 _TOKEN = re.compile(r"(?:[^\s:]|(?<=\d):(?=\d))+|:")
+# Leaders: the dots or rules of a fill-in blank ("......KIAMBU......", "..Province"). A run of two
+# or more is a separator token of its own, so it neither hides a label or end text glued to it
+# nor stays on the edge of a value.
+_LEADER = re.compile(r"\.{2,}|…+|_{2,}|·{2,}")
+
+
+def _leader_pieces(text: str, s: int, e: int) -> list[tuple[int, int]]:
+    """The token text[s:e] split around leader runs (each run is a piece of its own)."""
+    out: list[tuple[int, int]] = []
+    pos = s
+    for m in _LEADER.finditer(text, s, e):
+        if m.start() > pos:
+            out.append((pos, m.start()))
+        out.append(m.span())
+        pos = m.end()
+    if pos < e:
+        out.append((pos, e))
+    return out
 
 
 def _split_glued(token: str, vocab: list[Variant]) -> Optional[int]:
@@ -345,6 +414,19 @@ def _split_glued(token: str, vocab: list[Variant]) -> Optional[int]:
                         if rest and re.search(r"\d", token[i + 1:]):
                             return i + 1
                         break
+    return None
+
+
+def _split_label_tail(token: str, tails: frozenset[str]) -> Optional[int]:
+    """Char offset where the last word of a label of two or more words is glued to a value
+    that starts with a figure: the last line of a stacked label read in one box with its value
+    ("No.687860/36" -> 3, "Registration12.03.2001" -> 12). After a full stop for any such
+    word, directly for a word of five letters or more."""
+    m = re.match(r"([A-Za-z]+)(\.?)(?=\d)", token)
+    if not m or canon(m.group(1)) not in tails:
+        return None
+    if m.group(2) or len(m.group(1)) >= 5:
+        return m.end()
     return None
 
 
@@ -372,6 +454,7 @@ def _split_anchor_glue(token: str, heads: frozenset[str], tails: frozenset[str])
 def tokenize(lines: list[OcrLine], vocab: list[Variant],
              glue: tuple[frozenset[str], frozenset[str]] = (frozenset(), frozenset())) -> list[Word]:
     words: list[Word] = []
+    tails = frozenset(v.words[-1] for v in vocab if len(v.words) >= 2)
     for li, line in enumerate(lines):
         text = line.text
         n = max(len(text), 1)
@@ -379,21 +462,29 @@ def tokenize(lines: list[OcrLine], vocab: list[Variant],
         span = r - l
         pieces: list[tuple[int, int]] = []
         for m in _TOKEN.finditer(text):
-            s, e = m.span()
-            cut = None if m.group(0) == ":" else _split_glued(m.group(0), vocab)
-            if cut is None and m.group(0) != ":" and (glue[0] or glue[1]):
-                cut = _split_anchor_glue(m.group(0), *glue)
-            if cut:
-                pieces += [(s, s + cut), (s + cut, e)]
-            else:
-                pieces.append((s, e))
+            for s, e in _leader_pieces(text, *m.span()):
+                tok = text[s:e]
+                cut = None if tok == ":" or _LEADER.fullmatch(tok) else _split_glued(tok, vocab)
+                if cut is None and tok != ":" and (glue[0] or glue[1]):
+                    cut = _split_anchor_glue(tok, *glue)
+                if cut is None and tails and not pieces and s == m.start():
+                    cut = _split_label_tail(tok, tails)  # only the first word of a box
+                if cut:
+                    pieces += [(s, s + cut), (s + cut, e)]
+                else:
+                    pieces.append((s, e))
+        lead = True  # only separators so far in this OCR box
+        prev_leader = False
         for pos, (s, e) in enumerate(pieces):
             tok = text[s:e]
             box = (l + span * s / n, t, l + span * e / n, b)
-            words.append(Word(tok, canon(tok), box, li, pos, line.confidence,
-                              is_sep=(tok == ":" or not canon(tok)),
+            sep = tok == ":" or not canon(tok)
+            words.append(Word(tok, canon(tok), box, li, pos, line.confidence, is_sep=sep,
                               alpha=bool(re.search(r"[A-Za-z]", tok)),
-                              gap=(s == 0 or text[s - 1].isspace())))
+                              gap=(s == 0 or text[s - 1].isspace() or prev_leader),
+                              lead=lead and not sep))
+            lead = lead and sep
+            prev_leader = bool(_LEADER.fullmatch(tok))
     return words
 
 
@@ -551,6 +642,22 @@ def dehyphenate(words: list[Word], lex: Lexicon) -> tuple[list[Word], list[str]]
     return out, notes
 
 
+STACK_OFFSET = 0.3  # lines whose centres differ by this x text height or more are not side by side
+STACK_OVERLAP = 0.3  # ... when they overlap horizontally by this share of the narrower one
+
+
+def _stacked(a: Box, b: Box) -> bool:
+    """Two OCR boxes one above the other: they overlap horizontally, so they cannot be parts of
+    one visual line, and their centres are offset vertically. Lines of a label printed on two
+    lines in a cell are often closer than one text height and would otherwise be read as one
+    row, with their words interleaved ("Date Birth of")."""
+    h = min(a[3] - a[1], b[3] - b[1])
+    if abs((a[1] + a[3]) - (b[1] + b[3])) / 2 < STACK_OFFSET * h:
+        return False
+    ov = min(a[2], b[2]) - max(a[0], b[0])
+    return ov > STACK_OVERLAP * max(1e-6, min(a[2] - a[0], b[2] - b[0]))
+
+
 def group_rows(lines: list[OcrLine], words: list[Word]) -> list[list[Word]]:
     order = sorted(range(len(lines)), key=lambda i: (lines[i].box[1] + lines[i].box[3]) / 2)
     rows: list[list[int]] = []
@@ -562,6 +669,8 @@ def group_rows(lines: list[OcrLine], words: list[Word]) -> list[list[Word]]:
             ov = min(b, rb) - max(t, rt)
             ratio = ov / max(1e-6, min(b - t, rb - rt))
             if ratio >= 0.5 and ratio > best_ov:
+                if any(_stacked(lines[i].box, lines[k].box) for k in rows[ri]):
+                    continue  # one above the other, not side by side
                 best, best_ov = ri, ratio
         if best < 0:
             rows.append([i])
@@ -636,7 +745,10 @@ def _match_words(cand: list[str], var: Variant) -> Optional[float]:
     return (1.0 - d / max(n, 1)) * 0.97
 
 
-def find_label_hits(rows: list[list[Word]], vocab: list[Variant]) -> list[Hit]:
+def find_label_hits(rows: list[list[Word]], vocab: list[Variant],
+                    notes: Optional[dict[str, str]] = None) -> list[Hit]:
+    """Label hits in rows, single-line and stacked (`find_stacked_hits`), overlaps resolved.
+    `notes` receives, per field, why a stacked reading of its label was not used."""
     by_len: dict[int, list[Variant]] = {}
     for v in vocab:
         by_len.setdefault(len(v.joined), []).append(v)
@@ -661,24 +773,221 @@ def find_label_hits(rows: list[list[Word]], vocab: list[Variant]) -> list[Hit]:
                 total = sum(len(c) for c in cand)
                 for n in range(max(1, total - 3), total + 4):
                     for v in by_len.get(n, ()):
-                        if v.strict and first.pos != 0:
+                        if v.strict and not first.lead:
                             continue
                         s = _match_words(cand, v)
                         if s is not None and s >= 0.8:
                             raw_hits.append(Hit(-1, ri, i, j + 1, v, s, _union(x.box for x in span)))
-    # Resolve overlaps: longest, best-quality label wins its words.
-    raw_hits.sort(key=lambda hh: (-hh.weight, -hh.score, hh.start))
+    stacked = find_stacked_hits(rows, vocab)
+    # Resolve overlaps: longest, best-quality label wins its words, also across the lines of a
+    # stacked label, so "Name" alone cannot take a word of "Name of / Registering Officer".
+    # A stacked label each of whose lines has text of its own to the right is two rows of the
+    # form, not one label ("BODY  SALOON" above "COLOUR  WHITE", with "Body Colour" a label):
+    # it is dropped and the overlaps resolved again without it.
+    while True:
+        hits = _resolve_hits(rows, raw_hits + stacked)
+        rival = [hh for hh in hits if hh.parts and _rows_of_their_own(rows, hh)]
+        if not rival:
+            break
+        for hh in rival:
+            for owner in hh.variant.owners:
+                if notes is not None:
+                    notes.setdefault(owner, f"label '{hh.variant.text}' seems to be printed on "
+                                     f"{len(hh.parts)} lines, but each line has text to its right, "
+                                     "so they were read as separate rows of the form")
+        gone = {id(hh) for hh in rival}
+        stacked = [hh for hh in stacked if id(hh) not in gone]
+    for hh in hits:
+        if not hh.parts:
+            hh.fragment_of = _longer_label(rows, hh, vocab)
+    return hits
+
+
+def _resolve_hits(rows: list[list[Word]], raw_hits: list[Hit]) -> list[Hit]:
+    """Overlapping hits: the longest, best-quality label wins its words. Sets `Word.hit`."""
+    for row in rows:
+        for w in row:
+            w.hit = -1
+    raw_hits = sorted(raw_hits, key=lambda hh: (-hh.weight, -hh.score, hh.row, hh.start))
     taken: set[tuple[int, int]] = set()
     hits: list[Hit] = []
     for hh in raw_hits:
-        cells = {(hh.row, k) for k in range(hh.start, hh.end)}
+        cells = hh.cells()
         if cells & taken:
             continue
         taken |= cells
         hh.id = len(hits)
         hits.append(hh)
-        for k in range(hh.start, hh.end):
-            rows[hh.row][k].hit = hh.id
+        for r, k in cells:
+            rows[r][k].hit = hh.id
+    return hits
+
+
+def _rows_of_their_own(rows: list[list[Word]], hit: Hit) -> bool:
+    """Does every line of a stacked label have text to its right, before the next label, with
+    those texts in one column (all overlapping horizontally), as the values of rows of a form
+    are? Text far to the right of one line only (another cell's) does not count."""
+    spans = []
+    for r, s, e in hit.parts:
+        view = dataclasses.replace(hit, row=r, start=s, end=e,
+                                   box=_union(w.box for w in rows[r][s:e]), parts=())
+        ws = [w for w in _right_words(rows, view, float("inf")) if not w.is_sep]
+        if not ws:
+            return False
+        spans.append((ws[0].box[0], ws[-1].box[2]))
+    return max(lft for lft, _ in spans) < min(rgt for _, rgt in spans)
+
+
+def _box_words(rows: list[list[Word]]) -> dict[int, list[Word]]:
+    """The non-separator words of each OCR box, in reading order."""
+    out: dict[int, list[Word]] = {}
+    for row in rows:
+        for w in row:
+            if not w.is_sep:
+                out.setdefault(w.line, []).append(w)
+    for ws in out.values():
+        ws.sort(key=lambda w: (w.idx, w.pos))
+    return out
+
+
+def _longer_label(rows: list[list[Word]], hit: Hit, vocab: list[Variant]) -> Optional[Variant]:
+    """A longer label that starts with this hit's label and whose next words follow the hit in
+    the same OCR box: "Name" in a box "Name of" when "Name of Registering Officer" is a label.
+    The hit is then a piece of that label (the rest is elsewhere or was misread), and the words
+    after it are not its value."""
+    row = rows[hit.row]
+    last = row[hit.end - 1]
+    after = [w for w in row[hit.end:] if w.line == last.line and not w.is_sep]
+    if not after or after[0].hit >= 0:
+        return None
+    n = len(hit.variant.words)
+    for v in vocab:
+        if len(v.words) <= n or v.words[:n] != hit.variant.words:
+            continue
+        nxt = v.words[n]
+        if Levenshtein.distance(after[0].canon, nxt) <= _allowed_edits(len(nxt)):
+            return v
+    return None
+
+
+STACK_PITCH = 1.6  # lines of one label are at most this x text height apart (centre to centre)
+STACK_GAP = 0.6  # ... with at most this x text height of blank between them
+STACK_ALIGN = 1.0  # ... and share a left edge, centre or right edge within this x text height
+MAX_STACK_LINES = 3
+
+
+def _aligned(a: Box, b: Box, h: float) -> bool:
+    return (abs(a[0] - b[0]) <= STACK_ALIGN * h or abs(a[2] - b[2]) <= STACK_ALIGN * h
+            or abs((a[0] + a[2]) - (b[0] + b[2])) / 2 <= STACK_ALIGN * h)
+
+
+def find_stacked_hits(rows: list[list[Word]], vocab: list[Variant]) -> list[Hit]:
+    """Labels printed on two or three short lines of one cell ("Date of" above "Birth").
+
+    The label's words are the whole of each OCR box but the last, and the start of the last
+    box (the value may follow in that box: "Born  PCEA Hospital"). Each line is directly below
+    the one before: its centre 0.5 to STACK_PITCH text heights lower, at most STACK_GAP heights
+    of blank between them, text of a similar height, and aligned with it on the left, the
+    right or the centre (`_aligned`). Their words joined must match a label of two or more
+    words, as row labels are matched. A line that has other text after the label's words in
+    its box cannot be an upper line, which keeps "Name: JOHN" above "Surname: DOE" apart, and
+    so does running text, whose lines are full boxes of words."""
+    multi = [v for v in vocab if len(v.words) >= 2]
+    if not multi:
+        return []
+    by_len: dict[int, list[Variant]] = {}
+    for v in multi:
+        by_len.setdefault(len(v.joined), []).append(v)
+    maxw = max(len(v.words) for v in multi)
+    boxes = _box_words(rows)
+    info: dict[int, tuple[Box, float]] = {}
+    for li, ws in boxes.items():
+        # the box's words must be contiguous in their row (not interleaved with another box)
+        idx = [w.idx for w in ws]
+        between = rows[ws[0].row][idx[0]:idx[-1] + 1]
+        if any(not w.is_sep and w.line != li for w in between):
+            continue
+        box = _union(w.box for w in ws)
+        info[li] = (box, box[3] - box[1])
+    order = sorted(info, key=lambda li: info[li][0][1])
+
+    def below(li: int, frag: Box) -> list[int]:
+        box, h = info[li]
+        out = []
+        for lj in order:
+            b2, h2 = info[lj]
+            hh = max(h, h2)
+            if lj == li or not (0.7 <= h2 / h <= 1.4):
+                continue
+            pitch = (b2[1] + b2[3] - box[1] - box[3]) / 2
+            if pitch < 0.5 * hh or pitch > STACK_PITCH * hh or b2[1] - box[3] > STACK_GAP * hh:
+                continue
+            if min(b2[2], frag[2]) - max(b2[0], frag[0]) <= 0:
+                continue
+            out.append(lj)
+        return out
+
+    def label_word(w: Word) -> bool:
+        return w.alpha or len(w.canon) <= 2  # a number cannot be part of a label
+
+    def own_label(words: list[Word]) -> Optional[Variant]:
+        """The label these words are on their own, if any."""
+        cand = [w.canon for w in words]
+        total = sum(len(c) for c in cand)
+        best = None
+        for v in vocab:
+            if abs(len(v.joined) - total) <= 3:
+                sc = _match_words(cand, v)
+                if sc is not None and sc >= 0.8 and (best is None or sc > best[0]):
+                    best = (sc, v)
+        return best[1] if best else None
+
+    def separate_labels(lines: list[list[Word]], v: Variant) -> tuple[str, ...]:
+        """When every line is a label on its own and one of them belongs to another field
+        (or is one of the other_labels), those labels: the lines may be two labels ("Body"
+        above "Colour") rather than one ("Body Colour"), or one label whose lines are also
+        labels ("Entry" above "No."). Which cannot be told from the page."""
+        found = [own_label(ws) for ws in lines]
+        if all(found) and any(not f.owners or not f.owners <= v.owners for f in found):
+            return tuple(f.text for f in found)
+        return ()
+
+    hits: list[Hit] = []
+
+    def extend(chain: list[tuple[int, list[Word]]]) -> None:
+        """chain: (box, words) of the upper lines so far, each the whole box."""
+        upper_words = [w for _, ws in chain for w in ws]
+        last_li = chain[-1][0]
+        last_box = _union(w.box for w in chain[-1][1])
+        for lj in below(last_li, last_box):
+            ws = boxes[lj]
+            for k in range(1, min(len(ws), maxw - len(upper_words)) + 1):
+                frag = ws[:k]
+                if not all(label_word(w) for w in frag):
+                    break
+                fbox = _union(w.box for w in frag)
+                if not _aligned(last_box, fbox, max(info[last_li][1], info[lj][1])):
+                    continue
+                words = upper_words + frag
+                cand = [w.canon for w in words]
+                total = sum(len(c) for c in cand)
+                for n in range(max(1, total - 3), total + 4):
+                    for v in by_len.get(n, ()):
+                        s = _match_words(cand, v)
+                        if s is not None and s >= 0.8:
+                            parts = tuple((ws_[0].row, ws_[0].idx, ws_[-1].idx + 1)
+                                          for ws_ in [c for _, c in chain] + [frag])
+                            hits.append(Hit(-1, parts[0][0], parts[0][1], parts[0][2], v, s,
+                                            _union(w.box for w in words), parts,
+                                            lone=separate_labels([c for _, c in chain] + [frag], v)))
+            if len(chain) + 1 < MAX_STACK_LINES and len(ws) + len(upper_words) < maxw \
+                    and all(label_word(w) for w in ws) and _aligned(last_box, info[lj][0], info[lj][1]):
+                extend(chain + [(lj, ws)])
+
+    for li in order:
+        ws = boxes[li]
+        if len(ws) < maxw and all(label_word(w) for w in ws):
+            extend([(li, ws)])
     return hits
 
 
@@ -795,6 +1104,56 @@ def _right_words(rows: list[list[Word]], hit: Hit, page_w: float) -> list[Word]:
     while out and out[-1].is_sep:
         out.pop()
     return out
+
+
+def _value_places(rows: list[list[Word]], hit: Hit, page_w: float
+                  ) -> Iterable[tuple[str, float, Hit, list[Word]]]:
+    """(how, geometry factor, label view, words) of each place a label's value may be.
+
+    For a label on one line: to its right and below it. For a stacked label, to the right of
+    each of its lines, top first, to the right in any row whose middle lies within the label's
+    height (a value centred in its cell, level with none of the lines), and below its last line, in a column as wide as
+    the whole label. Each place is read through a view of the hit with that line's row, words
+    and box; the view keeps the hit's id, so the label's other lines are known as its own."""
+    if not hit.parts:
+        yield "right", GEOM_RIGHT, hit, _right_words(rows, hit, page_w)
+        yield "below", GEOM_BELOW, hit, _below_words(rows, hit)
+        return
+    view = hit
+    for r, s, e in hit.parts:
+        box = _union(w.box for w in rows[r][s:e])
+        view = dataclasses.replace(hit, row=r, start=s, end=e, box=box, parts=())
+        yield "right", GEOM_RIGHT, view, _right_words(rows, view, page_w)
+    # A value centred in its cell sits between the label's lines, level with neither, and so
+    # in a row of its own: read the rows whose middle falls inside the label's height.
+    own_rows = {r for r, _, _ in hit.parts}
+    h = view.box[3] - view.box[1]
+    for r, row in enumerate(rows):
+        if r in own_rows or not row:
+            continue
+        middle = (min(w.box[1] for w in row) + max(w.box[3] for w in row)) / 2
+        if not (hit.box[1] < middle < hit.box[3]):
+            continue
+        words: list[Word] = []
+        prev_right = hit.box[2]
+        for w in row:
+            if w.box[0] < hit.box[2]:
+                continue
+            if w.hit >= 0 or (words and w.box[0] - prev_right > 2.5 * h and w.line != words[-1].line):
+                break
+            if not words and w.box[0] - prev_right > 0.6 * page_w:
+                break
+            if _keep(w):
+                words.append(w)
+                prev_right = w.box[2]
+        if words:
+            yield "right", GEOM_RIGHT, view, words
+    last = dataclasses.replace(view, box=(hit.box[0], view.box[1], hit.box[2], view.box[3]))
+    yield "below", GEOM_BELOW, last, _below_words(rows, last)
+
+
+def _hit_words(rows: list[list[Word]], hit: Hit) -> list[Word]:
+    return [w for r, s, e in (hit.parts or ((hit.row, hit.start, hit.end),)) for w in rows[r][s:e]]
 
 
 def _keep(w: Word) -> bool:
@@ -916,7 +1275,8 @@ def _block_lines(rows: list[list[Word]], hit: Hit, first: list[Word], how: str
             continue
         if min(w.box[1] for w in row) - bottom > BLOCK_GAP * h:
             break
-        if gutter and any(not w.is_sep and w.box[2] > gutter[0] and w.box[0] < gutter[1] for w in row):
+        if gutter and any(not w.is_sep and w.hit != hit.id and w.box[2] > gutter[0] and w.box[0] < gutter[1]
+                          for w in row):
             # Text in the label column: the next row of the form, or the value wrapping back
             # to the label's margin.
             line, why = _wrap_back(row, hit, h, right, [w for ln in lines for w in ln])
@@ -1114,6 +1474,33 @@ class Layout:
             self._after[seg.id] = self.next_line(seg.row, (seg.l, seg.r), seg.b, seg.h)
         nxt = self._after[seg.id]
         return [w for s in nxt for w in s.words] if nxt else []
+
+    def along_row(self, hit: FlowHit) -> Optional[list[Word]]:
+        """A fill-in line ("Birth in the ....KIAMBU.... District in the ....CENTRAL.... Province"):
+        when the label ends its segment, the words of the later segments on the same row, read
+        across the wide gaps that `flow` does not cross. None when the label does not end its
+        segment, or fewer than two segments follow (a value and the end text) within reach
+        (each gap at most 0.6 of the page width)."""
+        last = hit.words[-1]
+        seg = self.segs[last.seg]
+        if hit.rcut is not None or any(w.seg != seg.id for w in hit.words):
+            return None
+        if any(not w.is_sep for w in seg.words[last.sidx + 1:]):
+            return None
+        out: list[Word] = []
+        right, n = seg.r, 0
+        for s in self.row_segs[seg.row]:
+            if s.l <= seg.r:
+                continue
+            if s.l - right > 0.6 * self.page_w:
+                break
+            out += s.words
+            right, n = s.r, n + 1
+        return out if n >= 2 else None
+
+    def starts_segment(self, w: Word) -> bool:
+        """Is this word the first word (separators aside) of its segment?"""
+        return all(x.is_sep for x in self.segs[w.seg].words[:w.sidx])
 
     def flow(self, hit: FlowHit, max_lines: int = MAX_FLOW_LINES) -> Iterable[list[Word]]:
         """Lines of text after a label in reading order: the rest of the label's line first
@@ -1672,6 +2059,26 @@ def _scan_until(lines: Iterable[list[Word]], untils: Anchors,
         p += 1
 
 
+def _along_row(layout: Layout, hit: FlowHit, ends: Anchors) -> Optional[_Scan]:
+    """The reading of a fill-in line (`Layout.along_row`), if it is one: the label ends its
+    segment, and a word end text starts a later segment on the same row, with at least one
+    word between them. Every gap of the row then bounds a piece of printed text or of the
+    entry, so the entry is exactly the segments between the two. None otherwise, and the
+    field is read in sentence order as usual."""
+    words = layout.along_row(hit)
+    if words is None:
+        return None
+    scan = _scan_until([words], ends, {})
+    if scan.end is None or not any(not w.is_sep for w in scan.value):
+        return None
+    if not layout.starts_segment(scan.end[0]):
+        return None
+    last = scan.value[-1]
+    if last.span is not None and last.parts and last.parts[0] is scan.end[0]:
+        return None  # the end text was found inside a word, not at the start of a segment
+    return scan
+
+
 def _contains_anchor(words: list[Word], anchors: Anchors) -> Optional[Variant]:
     content = [w for w in words if not w.is_sep]
     if not anchors or not content:
@@ -1781,7 +2188,9 @@ def flow_candidates(layout: Layout, specs: list[FieldSpec], wanted: set[str], fi
             run_on: Optional[tuple[str, Variant]] = None
             sentence_stop = False
             for hh in group:
-                scan = _scan_until(layout.flow(hh, MAX_FLOW_LINES + 1), end_anchors, memo, marks[name])
+                scan = _along_row(layout, hh, end_anchors) if end_anchors else None
+                if scan is None:
+                    scan = _scan_until(layout.flow(hh, MAX_FLOW_LINES + 1), end_anchors, memo, marks[name])
                 sentence_stop = sentence_stop or scan.sentence
                 if scan.end is not None:
                     if not any(not w.is_sep for w in scan.value):
@@ -1911,7 +2320,8 @@ def match_fields(
     vocab = build_vocabulary(doc_type, fields)
     words = tokenize(lines, vocab, _anchor_glue(doc_type, fields))
     rows = group_rows(lines, words)
-    hits = find_label_hits(rows, vocab)
+    stack_notes: dict[str, str] = {}
+    hits = find_label_hits(rows, vocab, stack_notes)
     page_w = page_size[0] if page_size else max((l.box[2] for l in lines), default=1.0)
     specs = {f.name: f for f in fields}
     lexicon = (build_lexicon(words, doc_type, fields)
@@ -1919,14 +2329,17 @@ def match_fields(
 
     candidates: list[Candidate] = []
     labelled: dict[str, Hit | FlowHit] = {}
+    fragments: dict[str, Hit] = {}
     for hit in hits:
         for owner in hit.variant.owners & set(specs):
             spec = specs[owner]
+            if hit.fragment_of is not None:
+                fragments.setdefault(owner, hit)
+                continue
             if owner not in labelled or hit.score > labelled[owner].score:
                 labelled[owner] = hit
             block_words: set[int] = set()
-            for how, geom, ws in (("right", GEOM_RIGHT, _right_words(rows, hit, page_w)),
-                                  ("below", GEOM_BELOW, _below_words(rows, hit))):
+            for how, geom, view, ws in _value_places(rows, hit, page_w):
                 if not ws:
                     continue
                 extra: list[str] = []
@@ -1934,7 +2347,7 @@ def match_fields(
                 if spec.multiline:
                     if how == "below" and id(ws[0]) in block_words:
                         continue  # the line below is the second line of the value to the right
-                    block, capped, cut = _block_lines(rows, hit, ws, how)
+                    block, capped, cut = _block_lines(rows, view, ws, how)
                     ws = [w for line in block for w in line]
                     block_words |= {id(w) for w in ws}
                     if capped:
@@ -1944,7 +2357,7 @@ def match_fields(
                     ws, joined = dehyphenate(ws, lexicon)
                     extra += joined
                 else:
-                    extra += _cut_short(rows, hit, ws, how)
+                    extra += _cut_short(rows, view, ws, how)
                 sub, raw, fit, warns = assess(ws, spec)
                 if not raw:
                     continue
@@ -1955,6 +2368,11 @@ def match_fields(
                 warns = list(warns) + extra
                 if hit.score < 0.9:
                     warns.append(f"label '{hit.variant.text}' matched loosely")
+                if hit.lone:
+                    lone = " / ".join(f"'{t}'" for t in hit.lone)
+                    warns.append(f"label '{hit.variant.text}' was read over {len(hit.parts)} lines that "
+                                 f"are also labels on their own ({lone}); check that the value is this "
+                                 "field's")
                 candidates.append(Candidate(owner, sub, raw, score, hit, warns, how, scale))
 
     # Fields with an end text (`until`) are read in reading order; see `flow_candidates`.
@@ -2006,6 +2424,13 @@ def match_fields(
             elif spec.name in labelled:
                 res.warnings.append(
                     f"label '{labelled[spec.name].variant.text}' found but no value next to or below it")
+            elif spec.name in stack_notes:
+                res.warnings.append(stack_notes[spec.name])
+            elif spec.name in fragments:
+                fh = fragments[spec.name]
+                res.warnings.append(
+                    f"label '{fh.variant.text}' found only as the start of the longer label "
+                    f"'{fh.fragment_of.text}', whose words follow it; they are not this field's value")
             elif _compile(spec.pattern) is not None:
                 res.warnings.append("label not found and no unambiguous value matches the format")
             else:
@@ -2021,6 +2446,11 @@ def match_fields(
                 # The label was on the page; say what actually happened.
                 c.warnings = ["no usable value beside the label; value located by its format"]
         conf = round(max(0.0, min(1.0, c.score * c.conf_scale)), 3)
+        if _filler(c.raw):
+            res.warnings += [*c.warnings, f"the entry is a row of '{c.raw.strip()[0]}', which strikes out or "
+                             "fills a blank; no value"]
+            results.append(res)
+            continue
         if conf < REJECT_BELOW:
             res.confidence = conf
             res.warnings += [*c.warnings, f"weak match rejected (confidence {conf:.2f})"]
@@ -2030,13 +2460,23 @@ def match_fields(
         res.box = _union(w.box for w in c.words)
         res.parts = [(w.line, w.box) for w in _leaves(c.words) if not w.is_sep]
         label = (c.hit.words if isinstance(c.hit, FlowHit)
-                 else rows[c.hit.row][c.hit.start:c.hit.end] if isinstance(c.hit, Hit) else [])
+                 else _hit_words(rows, c.hit) if isinstance(c.hit, Hit) else [])
         res.anchor_lines = sorted({w.line for w in _leaves([*label, *c.ends])})
         res.warnings = list(c.warnings)
         if conf < WARN_BELOW:
             res.warnings.append(f"low confidence ({conf:.2f})")
         results.append(res)
     return results, reading_order_text(rows, lines)
+
+
+FILLER_MIN = 4  # a value of one mark repeated this many times or more fills a blank
+
+
+def _filler(raw: str) -> bool:
+    """A row of one mark ("XXXXXXXX", "--------", "********"): how a blank in a form is struck
+    out or filled so nothing can be added. It is not a value."""
+    s = re.sub(r"\s+", "", raw)
+    return len(s) >= FILLER_MIN and len(set(s.lower())) == 1 and s[0] in "xX*-=~_/"
 
 
 REPEAT_RIVAL = 0.8  # another occurrence's value scoring this share of the chosen one is a rival

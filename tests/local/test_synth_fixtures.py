@@ -88,3 +88,21 @@ def test_glued_pages_leave_out_spaces_at_every_place():
     assert set(places) == {"date|BETWEEN", "vendor|of", "Box|digits", "and|purchaser", "Number|parcel",
                            "parcel|situated", "in|county", "The|purchase", "amount|(", "KES|figures",
                            "deposit|only", "the|day", "of|firm"}
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_ruled_labels_printed_are_in_the_yaml(seed):
+    doc = make_document("synth_ruled", "clean", seed)
+    yaml = load_doc_type(doc_type_ref("synth_ruled"))
+    assert set(doc.truth) == {f.name for f in yaml.fields}
+    for name, label in doc.labels.items():
+        assert label.lower() in [x.lower() for x in yaml.field(name).labels()], (name, label)
+
+
+def test_ruled_form_has_stacked_labels_every_value_place_and_struck_entries():
+    from synth import ruled_for
+    import random
+    cells = [c for s in range(20) for row in ruled_for(random.Random(f"synth_ruled/{s}"))[0] for c in row]
+    assert {c.place for c in cells if len(c.label) > 1} == {"top", "middle", "bottom", "joined", "below"}
+    assert any(len(c.label) == 3 for c in cells)
+    assert any(c.expected is None and set(c.value) == {"X"} for c in cells)
