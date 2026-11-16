@@ -44,6 +44,10 @@ def _bundled_model_paths() -> dict[str, str]:
 # other worker processes.
 DEFAULT_THREADS = 4
 
+# The largest image, after the detector's own resizing, that is sent to the detector. A full
+# page capped at 2000 px on the long side is at most about 4 megapixels.
+MAX_DETECTOR_PIXELS = 12_000_000
+
 
 def _thread_count() -> int:
     cpus = os.cpu_count() or 1
@@ -97,7 +101,27 @@ class RapidOcrEngine(OcrEngine):
                         raise ExtractorError(f"Could not start RapidOCR: {exc}") from exc
         return self._ocr
 
+    def _too_big_for_detector(self, image: np.ndarray) -> bool:
+        """Would the detector's own resizing turn this image into an enormous one?
+
+        The detector enlarges its input until the short side reaches a fixed size, so a thin
+        strip (3x3000) becomes hundreds of thousands of pixels long and the allocation runs to
+        gigabytes. `imaging` refuses such pages; this guards the crops and any other caller."""
+        height, width = image.shape[:2]
+        if min(height, width) < 1:
+            return True
+        try:
+            scale = self.detector_resolution(width, height)
+        except ExtractorError:
+            # The settings could not be read; assume RapidOCR's defaults (long side capped at
+            # 2000, short side enlarged to 736).
+            factor = min(1.0, 2000 / max(width, height))
+            scale = factor * max(1.0, 736 / (min(width, height) * factor))
+        return width * scale * height * scale > MAX_DETECTOR_PIXELS
+
     def _call(self, image: np.ndarray, **kwargs):
+        if kwargs.get("use_det") and self._too_big_for_detector(image):
+            return None
         try:
             engine = self._engine()
             with self._call_lock:

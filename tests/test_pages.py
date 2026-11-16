@@ -126,7 +126,7 @@ def test_empty_list_and_odd_type():
 
 
 def test_pdf_render_size_is_capped():
-    for box in [(595, 842), (14400, 14400), (14400, 20), (30, 30)]:
+    for box in [(595, 842), (14400, 14400), (14400, 600), (30, 30)]:
         with open_pages(pdfs.raw_pdf([box])) as pages:
             (image,) = list(pages)
         assert RENDER_LONG_SIDE <= max(image.size) <= RENDER_LONG_SIDE + 1, (box, image.size)

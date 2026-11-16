@@ -54,6 +54,7 @@ SPACE_GAP = 0.15  # a gap wider than this x text height is a word space
 MAX_DOUBTFUL = 0.2  # above this share of untrusted or turned characters, OCR the whole page
 MIN_PICTURE_AREA = 0.01  # pictures smaller than this share of the page are not read by OCR
 WHOLE_PAGE_AREA = 0.6  # OCR areas covering more than this share of the page: OCR it whole
+MAX_PAGE_CHARS = 20_000  # more characters than this on one page: not a normal page, OCR it
 MIN_INK_STD = 6.0  # grey-level spread under a line below this: nothing is drawn there
 UPRIGHT_TOLERANCE = 0.035  # radians (2 degrees)
 CONF_TEXT = 1.0  # confidence of a line from a trusted text layer
@@ -377,6 +378,11 @@ def build_layer(text: PdfText, image: Optional[Image.Image], mode: str = "auto")
     chars = [c for c in chars if _inside(c.box, (0, 0, size[0], size[1]))]
     if not chars or mode == "never":
         return TextLayer("ocr")
+    if len(chars) > MAX_PAGE_CHARS:
+        # Thousands of lines of microscopic text cost minutes in the matcher. A real page has a
+        # few thousand characters; read this one as an image, which is bounded.
+        return TextLayer("ocr", notes=[f"text layer has {len(chars)} characters, over the limit "
+                                       f"of {MAX_PAGE_CHARS}; not used"])
 
     if mode == "always":
         usable = [c for c in chars if c.upright and not _bad(c.ch)]

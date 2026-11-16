@@ -10,6 +10,7 @@ first use so that commands that read no document stay light.
 from __future__ import annotations
 
 import io
+import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -45,11 +46,46 @@ def _finish(image: Image.Image) -> Image.Image:
     return ImageOps.exif_transpose(image).convert("RGB")
 
 
+# A page is refused before it is decoded when it is larger than this many megapixels or more
+# elongated than MAX_ASPECT. Both are attacks otherwise: a blank 13000x13000 PNG is 20 KB on the
+# wire and 2 GB decoded and preprocessed, and a 3x3000 strip makes the text detector, which
+# enlarges the short side to a fixed size, ask for gigabytes.
+# The only image decoders that are ever used. Pillow ships dozens more (EPS, PSD, DDS, WMF and
+# so on), each a parser that a hostile file could reach; most published Pillow vulnerabilities
+# are in formats a scanned or photographed document never comes in.
+Image.init()  # register every decoder plugin, so the names below can be looked up
+IMAGE_FORMATS = [f for f in ("PNG", "JPEG", "MPO", "TIFF", "WEBP", "GIF", "BMP") if f in Image.OPEN]
+
+MAX_MEGAPIXELS_ENV = "DOCOCR_MAX_MEGAPIXELS"
+DEFAULT_MAX_MEGAPIXELS = 64.0
+MAX_ASPECT = 30.0
+MIN_SIDE = 16  # pixels
+
+
+def max_pixels() -> int:
+    try:
+        mp = float(os.environ.get(MAX_MEGAPIXELS_ENV, DEFAULT_MAX_MEGAPIXELS))
+    except ValueError:
+        mp = DEFAULT_MAX_MEGAPIXELS
+    return int((mp if mp > 0 else DEFAULT_MAX_MEGAPIXELS) * 1_000_000)
+
+
 def _check_pixels(size: tuple[int, int]) -> None:
-    limit = Image.MAX_IMAGE_PIXELS
-    if limit is not None and size[0] * size[1] > 2 * limit:
-        raise Image.DecompressionBombError(
-            f"image of {size[0]}x{size[1]} pixels is over the safety limit"
+    """Refuse an image by its header, before its pixels are decoded."""
+    width, height = size
+    if width * height > max_pixels():
+        raise SourceError(
+            f"the image is {width}x{height} pixels, over the limit of "
+            f"{max_pixels() // 1_000_000} megapixels ({MAX_MEGAPIXELS_ENV})"
+        )
+    _check_shape(size, "image")
+
+
+def _check_shape(size: tuple[int, int], what: str) -> None:
+    short, long_ = min(size), max(size)
+    if short < MIN_SIDE or long_ > MAX_ASPECT * short:
+        raise SourceError(
+            f"the {what} is {size[0]}x{size[1]} pixels: too small or too narrow to read"
         )
 
 
@@ -61,9 +97,10 @@ def load_image(source: ImageSource) -> Image.Image:
     if isinstance(source, Image.Image):
         image = source
     elif isinstance(source, (bytes, bytearray)):
-        image = Image.open(io.BytesIO(source))
+        image = Image.open(io.BytesIO(source), formats=IMAGE_FORMATS)
     else:
-        image = Image.open(Path(source))
+        image = Image.open(Path(source), formats=IMAGE_FORMATS)
+    _check_pixels(image.size)
     return _finish(image)
 
 
@@ -173,6 +210,9 @@ def _pdf_leaf(data: Union[bytes, Path]) -> _Leaf:
                         raise SourceError(f"page {index + 1} of the PDF has no usable size")
                     # The longest side comes out at RENDER_LONG_SIDE whatever the page's own
                     # dimensions, so a huge page cannot make a huge bitmap.
+                    shortest = min(width, height)
+                    if not (shortest > 0) or longest > MAX_ASPECT * shortest:
+                        raise SourceError(f"page {index + 1} of the PDF is too narrow to read")
                     image = page.render(scale=RENDER_LONG_SIDE / longest).to_pil()
                     layer = None
                     if text:
@@ -215,14 +255,14 @@ def _leaf_for(source: object) -> _Leaf:
         data = bytes(source)
         if _is_pdf_bytes(data):
             return _pdf_leaf(data)
-        image = Image.open(io.BytesIO(data))
+        image = Image.open(io.BytesIO(data), formats=IMAGE_FORMATS)
     elif isinstance(source, (str, Path)):
         path = Path(source)
         with open(path, "rb") as handle:
             head = handle.read(_PDF_MAGIC_WINDOW)
         if _is_pdf_bytes(head):
             return _pdf_leaf(path)
-        image = Image.open(path)
+        image = Image.open(path, formats=IMAGE_FORMATS)
     else:
         raise SourceError(f"cannot read a document from a {type(source).__name__}")
     frames = getattr(image, "n_frames", 1) if image.format in _PAGED_FORMATS else 1

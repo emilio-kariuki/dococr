@@ -688,6 +688,9 @@ def _compile(pattern: str) -> Optional[re.Pattern]:
         return None
 
 
+MAX_TYPED_LENGTH = 2000  # characters; a date or number is never longer, and parsing is not free
+
+
 def normalize_value(raw: str, spec: FieldSpec) -> tuple[Value, list[str]]:
     """Return (value, warnings). Must never raise, and must be idempotent:
     normalising an already-normalised value returns it unchanged."""
@@ -697,6 +700,8 @@ def normalize_value(raw: str, spec: FieldSpec) -> tuple[Value, list[str]]:
         if not isinstance(raw, str):
             raw = str(raw)
         kind = spec.type
+        if len(raw) > MAX_TYPED_LENGTH and kind in (FieldType.DATE, FieldType.INTEGER, FieldType.NUMBER):
+            return None, [f"value is {len(raw)} characters long, too long to read as a {kind.value}"]
         if kind == FieldType.DATE:
             value, warnings = _normalize_date(raw, spec.month_first())
         elif kind == FieldType.INTEGER:

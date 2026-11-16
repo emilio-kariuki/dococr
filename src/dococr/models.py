@@ -21,6 +21,47 @@ def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
 
 
+def _nested_unbounded_repeat(pattern: str) -> bool:
+    """True for a pattern with an unbounded repeat inside another unbounded repeat, the shape
+    that makes Python's backtracking matcher take exponential time ('(a+)+$', '(\\d*)*x').
+    An invalid pattern is not this function's business; it is reported where it is compiled."""
+    try:
+        try:
+            from re import _parser as parser  # Python 3.11+
+        except ImportError:  # Python 3.10
+            import sre_parse as parser
+        tree = parser.parse(pattern)
+    except Exception:
+        return False
+    unbounded = parser.MAXREPEAT
+
+    def walk(items, inside: bool) -> bool:
+        for op, arg in items:
+            name = str(op)
+            if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+                low, high, body = arg
+                here = high == unbounded
+                if here and inside:
+                    return True
+                if walk(body, inside or here):
+                    return True
+            elif name == "SUBPATTERN":
+                if walk(arg[-1], inside):
+                    return True
+            elif name == "BRANCH":
+                if any(walk(branch, inside) for branch in arg[1]):
+                    return True
+            elif name in ("ASSERT", "ASSERT_NOT"):
+                if walk(arg[1], inside):
+                    return True
+            elif name == "ATOMIC_GROUP":
+                if walk(arg, inside):
+                    return True
+        return False
+
+    return walk(tree, False)
+
+
 class FieldType(str, Enum):
     STRING = "string"  # free text, whitespace collapsed
     NAME = "name"  # a person's name
@@ -51,6 +92,12 @@ class FieldSpec(BaseModel):
 
     @model_validator(mode="after")
     def _defaults(self) -> "FieldSpec":
+        if self.pattern and _nested_unbounded_repeat(self.pattern):
+            raise ValueError(
+                f"pattern {self.pattern!r} repeats a group that itself repeats without limit "
+                "(like '(a+)+'); such a pattern can take practically forever on some text. "
+                "Rewrite it without the nested repeat."
+            )
         self.name = slugify(self.name)
         if not self.label:
             self.label = self.name.replace("_", " ").title()
