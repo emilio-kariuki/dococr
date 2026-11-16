@@ -1,0 +1,54 @@
+# Kenyan certificate of birth: a ruled form. Labels are printed on two lines inside their cells
+# (write them here in full, on one line) and the district and province are on a fill-in line.
+name: birth_certificate
+title: Certificate of birth
+description: Certificate of birth issued by the civil registrar.
+aliases: ["certificate of birth", "birth cert"]
+other_labels:
+  - Republic of Kenya
+  - Certificate of Birth
+  - Registrar for
+  - Given under the Seal of the Principal Civil Registrar
+  - This certificate is issued in pursuance
+  - "Note: A Certificate of Birth is not proof of Kenya Citizenship"
+fields:
+  - name: certificate_number
+    label: "No"
+    aliases: ["D No", "Nº", "N°"]
+    type: identifier
+    pattern: '\d{5,8}'
+  - name: district
+    label: Birth in the
+    until: District in the
+  - name: province
+    label: District in the
+    until: Province
+  - name: entry_number
+    label: Entry No.
+    aliases: ["Entry No"]
+    type: identifier
+    pattern: '\d{4,9}/\d{2,4}'
+  - name: where_born
+    label: Where Born
+  - name: name
+    label: Name
+    type: name
+  - name: date_of_birth
+    label: Date of Birth
+    type: date
+  - name: sex
+    label: Sex
+  - name: father_name
+    label: Name and Surname of Father
+    type: name
+  - name: mother_name
+    label: Name and Maiden Name of Mother
+    type: name
+  - name: informant
+    label: Name and Description of Informant
+  - name: registering_officer
+    label: Name of Registering Officer
+    type: name
+  - name: date_of_registration
+    label: Date of Registration
+    type: date
