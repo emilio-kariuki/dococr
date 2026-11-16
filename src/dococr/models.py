@@ -89,6 +89,10 @@ class FieldSpec(BaseModel):
     # "month_first" (12/05/08 = 5 December 2008). None takes the document type's `date_order`,
     # and day first when that is not set either. Only `type: date` fields use it.
     date_order: Optional[Literal["day_first", "month_first"]] = None
+    # The value is written by hand on the document. The OCR engine was built for print: it
+    # misreads about one handwritten word in three and is often confident when it does, so a
+    # value found for such a field always carries a warning, whatever its confidence.
+    handwritten: bool = False
 
     @model_validator(mode="after")
     def _defaults(self) -> "FieldSpec":

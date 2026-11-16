@@ -64,11 +64,16 @@ def warm_up() -> Extractor:
     return engine
 
 
+HANDWRITTEN_WARNING = "handwritten field: the reading is unreliable whatever its confidence; check it by eye"
+
+
 def _normalise(found: FieldResult, spec: FieldSpec, page: int) -> FieldResult:
     raw = found.raw.strip() if found.raw else None
     if not raw:
         return FieldResult(name=spec.name, warnings=list(found.warnings))
     value, warnings = normalize_value(raw, spec)
+    if spec.handwritten:
+        warnings = [*warnings, HANDWRITTEN_WARNING]
     return found.model_copy(
         update={"raw": raw, "value": value, "warnings": [*found.warnings, *warnings], "page": page}
     )

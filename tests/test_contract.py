@@ -133,3 +133,24 @@ def test_typed_field_that_does_not_parse_keeps_raw_but_has_no_value(image):
     assert closing.raw == "to be agreed" and closing.value is None and "could not parse date" in closing.warnings
     assert result.fields["note"].value == "Not applicable"  # a string is never unparsed
     assert result.missing == ["shares", "closing"]  # `missing` is every field without a value
+
+
+def test_a_handwritten_field_is_always_flagged(image):
+    """Handwriting is misread often and confidently, so the confidence cannot be the guard: a
+    field the YAML marks as handwritten carries a warning whenever it has a value."""
+    from dococr import DocType, FieldSpec
+    from dococr.pipeline import HANDWRITTEN_WARNING
+
+    doc = DocType(name="form", fields=[
+        FieldSpec(name="applicant", handwritten=True),
+        FieldSpec(name="reference"),
+        FieldSpec(name="witness", handwritten=True),
+    ])
+    fake = FakeExtractor({"applicant": "JANE DOE", "reference": "AB123"})
+    result = extract(image, doc, extractor=fake)
+    assert result.fields["applicant"].value == "JANE DOE"
+    assert HANDWRITTEN_WARNING in result.fields["applicant"].warnings
+    assert result.fields["applicant"].confidence == 0.9  # high confidence does not remove it
+    assert result.fields["reference"].warnings == []
+    assert HANDWRITTEN_WARNING not in result.fields["witness"].warnings  # nothing found, nothing to flag
+    assert result.missing == ["witness"]
