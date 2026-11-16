@@ -705,7 +705,20 @@ in ordinary type. Scoring ignored case and punctuation.
   path, files far larger than the current 32 MB, and one to four seconds per line on a CPU. It was
   trained on IAM, so those figures flatter it; quantised and ONNX versions were not measured.
   Adopting it is a decision for the owner, because of size, speed and the second runtime.
-- **Not measured:** block capitals, and photographs of real handwritten forms.
+- **Block capitals** (1,000 fields composed from NIST Special Database 19 hand-printed
+  characters, one writer per field, 728 writers; the data is public domain and stays outside the
+  repository): 2.4% of characters wrong, 83% of fields exactly right (digit strings 92.5%, amounts
+  89%, names and dates 80.5%, alphanumeric codes 72.5%), against 100% for the same text in print.
+  Of the wrong fields, 91% scored 0.9 or more; a threshold that catches most errors flags a
+  quarter to a third of the correct fields. Detection found every entry and never merged one with
+  its printed label. End to end on 40 test forms: 79% right, 5% missing, 16% wrong. Composed
+  fields lack natural touching and uneven sizes, so this is an optimistic bound.
+- **`handwritten: true`** on a field makes the pipeline attach a warning to any value found,
+  because confidence cannot be the guard.
+- **Amounts:** a misread separator changes a number's size silently (`9,492,157.75` read as
+  `9.492157.75`). `normalize._irregular_separators` now warns when the separators do not form a
+  regular number.
+- **Not measured:** photographs of real handwritten forms; the large model on block capitals.
 
 ## Real documents
 

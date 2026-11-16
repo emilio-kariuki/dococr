@@ -34,7 +34,8 @@ Working on the code? See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Coding ag
 
 ## Install
 
-Python 3.10 or newer. No GPU and no system packages are needed.
+Python 3.11 or newer is recommended (3.10 works, with an older image library; see
+[Security](#security)). No GPU and no system packages are needed.
 
 ```bash
 pip install .                # library and the `dococr` command
@@ -428,6 +429,7 @@ Keys for each field:
 | `aliases` | Every other printed form of the label. Nothing is expanded for you: if a document prints `Member No` on one version and `Member Number` on another, list both. |
 | `type` | How the value is cleaned up. See the table below. Defaults to `string`. A date is only returned as `YYYY-MM-DD` when the field says `type: date`. |
 | `pattern` | A regular expression that a valid value matches in full. A value that does not match is still returned, with a warning. If no value is found beside the label and exactly one piece of text on the page matches the pattern, that text is used, with its confidence halved (so at most 0.5) and a warning. A pattern that repeats a group which itself repeats without limit, such as `(a+)+`, is refused when the file is loaded, because it can take practically forever on some text. |
+| `handwritten` | `true` when the value is written by hand. The reading is then always returned with a warning to check it by eye, however confident the engine is. See [Handwriting](#handwriting). |
 | `multiline` | `true` when the value can run onto the following lines, such as an address. See [Values over several lines](#values-over-several-lines). |
 | `until` | The words that come straight after the value. Use it for a value inside a sentence. One text or a list of alternatives. See [Values inside sentences](#values-inside-sentences). |
 | `description` | A note for people reading the file. It does not affect matching. |
@@ -693,8 +695,16 @@ The OCR engine was built for print. On handwriting it works partly, and it is no
   handwritten field as needing a person's check.
 - **Handwritten entries are found.** On test forms mixing printed labels and handwritten entries,
   99% of the entries were located. Reading them is the weak part.
-- **Not measured:** block capitals, which is how many forms are filled in and is probably easier,
-  and photographs of real handwritten forms.
+- **Block capitals are easier, and still not dependable.** On 1,000 form-style fields composed
+  from real hand-printed capitals and digits (the NIST handprinted character set, 728 writers),
+  83% were read exactly: digit strings 92%, amounts 89%, names and dates 80%, mixed letter-and-digit
+  codes 72%. Through the whole extractor on test forms, 79% of fields were right, 5% missing and
+  16% wrong, and most of the wrong ones scored 0.9 or more. The matcher always took the value from
+  the right place; the misreading is in the characters. These fields were composed from separate
+  characters, so real form entries are probably worse.
+- **Mark handwritten fields in the YAML** with `handwritten: true`. Any value found for them then
+  carries a warning to check it by eye, however confident the engine is.
+- **Not measured:** photographs of real handwritten forms.
 
 Eight other recognition models that the engine can use were measured on the same lines and none
 did better. A dedicated handwriting model (TrOCR) read 87 to 89% of the words, but it is 250 MB to
@@ -720,10 +730,11 @@ findings fixed; `tests/test_security.py` keeps each attack as a regression test.
 - **Nothing a request names is read from disk.** A document type is looked up by name only, upload
   file names are ignored, and uploads are never written to disk.
 - **Corrupted PDFs** (200 mutated files) were handled without a crash or hang.
-- **Known gap: the image library.** Pillow 13.0.0 fixes a long list of published vulnerabilities
-  and needs Python 3.11 or newer; on Python 3.10 the newest available is 12.3.0. dococr limits the
-  exposure by decoding only six image formats, but run it on Python 3.11+ to get the fixed
-  version. `requirements.lock` records the exact versions this code was tested with.
+- **Use Python 3.11 or newer.** Pillow 13.0.0 fixes a long list of published vulnerabilities and
+  needs Python 3.11+; on Python 3.10 the newest available is 12.3.0, which has 42 known
+  advisories. dococr installs and runs on 3.10, and limits the exposure there by decoding only
+  six image formats, but it is developed and tested on Python 3.12, where a scan of all installed
+  packages finds no known vulnerabilities. `requirements.lock` records those exact versions.
 - **YAML files are trusted input.** Do not load document type files from people you do not trust.
 
 ## Performance

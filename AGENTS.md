@@ -32,10 +32,11 @@ documents the user-facing behaviour.
 
 ## Setup and commands
 
-There is no `uv` on this machine. Use the virtualenv.
+The virtualenv runs Python 3.12, installed for this user with `uv python install 3.12` (the
+system Python is 3.10, which cannot install the fixed Pillow 13). Use the virtualenv for everything.
 
 ```bash
-python3 -m venv .venv                       # only if .venv does not exist
+"$(uv python find 3.12)" -m venv .venv      # only if .venv does not exist
 .venv/bin/pip install -e ".[all,dev]"
 
 .venv/bin/pytest -m "not slow"              # fast suite, seconds, no OCR model
