@@ -180,7 +180,7 @@ change to `ocr/` or `preprocess.py`; a speed-up that loses fields is not accepte
   When a test or a real document fails for this reason, fix the YAML.
 - **`tests/synth.py` has its own label lists** for rendering. A label it prints must be in the
   field's YAML `label` or `aliases`, or the eval drops. The same holds for the fixture types in
-  `tests/doctypes/` (`synth_form`, `synth_agreement`, `synth_contract`, `synth_glued`), which are test data and
+  `tests/doctypes/` (`synth_form`, `synth_agreement`, `synth_contract`, `synth_glued`, `synth_ruled`), which are test data and
   are not shipped; do not add an agreement type to `src/dococr/presets/`, because agreements
   differ in wording and each author writes the YAML for theirs.
 - **The orientation classifier must only see a short slice of a line** (`_classifier_window` in

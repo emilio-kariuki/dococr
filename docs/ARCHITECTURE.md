@@ -639,7 +639,9 @@ The synthetic variants are `clean`, `colon`, `two_column`, `value_below`, `rot90
 
 - Accuracy is measured on synthetic pages and one real national ID. Real logbooks, licences and
   passports are untested.
-- Not handled: labels wrapped onto two lines, bilingual `A / B` labels, the machine-readable zone
+- Not handled: labels over more than three lines, a word broken across two lines, a two-line value
+  level with both lines of a stacked label, a fill-in blank narrower than 1.5 text heights,
+  bilingual `A / B` labels, the machine-readable zone
   of a passport, non-Latin scripts.
 - Sentence values depend on the wording in the YAML. Not handled there: prose set in several
   columns, a sentence that continues on the next page, number words in languages other than
@@ -747,6 +749,45 @@ values:
 
 These thresholds and word lists are generic rules seen working on 24 documents, not validated on
 more. Warning rates on real documents were not measured.
+
+## Ruled forms
+
+Added after a real certificate returned 3 of 13 fields: its labels are stacked on two lines inside
+cells and it has a fill-in line with dotted leaders.
+
+- **Rows.** A line that overlaps a row member horizontally with its centre at least 0.3 text
+  heights away is given its own row; before, the two lines of a stacked label were merged into one
+  row and their words interleaved.
+- **Stacked labels.** A label of two or more words may be on two or three lines: each upper line
+  a whole OCR box, the last line the start of a box (the value may follow in it). Lines must be
+  directly below one another (centres 0.5 to 1.6 text heights apart, at most 0.6 blank, height
+  ratio 0.7 to 1.4) and aligned left, right or centre within one text height. The value is looked
+  for to the right of each line and below the last.
+- **Refused:** a box that already holds a value is not an upper line; lines that each have text to
+  their right in one column are separate form rows (the field gets a warning); lines that are each
+  a label of another field are kept with a warning.
+- **A short label inside a longer one.** A stacked label claims all its words, and a short label
+  followed in its box by the next word of a longer label gives no value (`_longer_label`). This is
+  what returned a fragment of another label as a value with full confidence.
+- **Fill-in lines.** For an `until` field whose label ends its segment and whose end text starts a
+  later segment of the same row, the value is the segments between (each gap up to 0.6 of the page
+  width). Runs of two or more dots, underscores or an ellipsis are separators.
+- **Struck-out entries.** A value that is one mark repeated four or more times is missing, with a
+  warning.
+
+A value centred in its cell, level with neither line of a stacked label, is read from any row
+whose middle lies within the label's height.
+
+Measured: the certificate 12 of 13 right and the struck-out field missing; fixture `synth_ruled`
+378 of 385 (81 of 385 before), the seven misses OCR errors; every other evaluation unchanged,
+including the 24 real public documents (270 / 7 / 2 / 1). The thresholds come from one real form
+and the synthetic pages.
+
+The shipped `logbook.yaml` was corrected against one real registration certificate: the form
+prints `Registration`, `Make of Vehicle` and `Owner's Name` (a header with the value below), and
+has a dozen labels the first version did not list. Before the correction three fields came back
+wrong without a warning; after it, 26 of 26 filled fields were right and 4 blanks missing. The
+`driving_license` and `passport` files have still not been checked against real documents.
 
 ## Possible next steps
 

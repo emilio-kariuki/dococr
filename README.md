@@ -19,7 +19,7 @@ result.values()   # {"id_number": "12345678", "full_name": "JANE WANJIRU DOE", "
 
 A document type is a YAML file that lists the fields and the labels printed next to them. The code
 knows nothing about any particular document: it reads the YAML you give it and returns those
-fields. Four YAML files are included (national ID, driving licence, vehicle logbook, passport), and
+fields. Five YAML files are included (national ID, driving licence, vehicle logbook, passport, birth certificate), and
 you add your own the same way. It reads forms and cards that print a label next to each value, values
 that run over several lines, and values inside the sentences of a typed agreement.
 
@@ -363,7 +363,7 @@ change.
 | Place | How it is used |
 |---|---|
 | Your own folder | Any folder of `.yaml` files. Point at it with `--types-dir DIR` or the `DOCOCR_DOCTYPES_DIR` environment variable (several folders separated by `:`). |
-| The included files | `src/dococr/presets/`: `national_id.yaml`, `driving_license.yaml`, `logbook.yaml`, `passport.yaml`. |
+| The included files | `src/dococr/presets/`: `national_id.yaml`, `driving_license.yaml`, `logbook.yaml`, `passport.yaml`, `birth_certificate.yaml`. |
 | A single file | `--doc-type-file FILE.yaml`, or the path as the document type in Python. |
 
 Your folder is searched first, so a file of yours with the same name as an included one replaces
@@ -576,6 +576,37 @@ This is matching on the wording you supply, not understanding of the text. It su
 follow a standard form. A document worded differently from your YAML returns missing fields, not
 wrong ones.
 
+### Ruled forms and fill-in lines
+
+Certificates and official forms often print each label on two or three short lines inside a cell,
+with the typed entry in the next cell. Write the label as its full wording, on one line:
+
+```yaml
+  - name: date_of_birth
+    label: Date of Birth        # printed as "Date of" above "Birth"
+    type: date
+```
+
+A line with blanks to fill in, such as `Birth in the ....KIAMBU.... District in the ....CENTRAL....
+Province`, is written with `until`; one field's end text can be the next field's label, and rows of
+dots are ignored:
+
+```yaml
+  - name: district
+    label: Birth in the
+    until: District in the
+  - name: province
+    label: District in the
+    until: Province
+```
+
+- **A struck-out entry** (a blank filled with `xxxxxxxx` or dashes) comes back missing, with a
+  warning saying so.
+- **Avoid a one-word alias that is also one line of a stacked label** (`Entry` when the form prints
+  `Entry` above `No.`). The value is still returned, with a warning to check it.
+- **A very narrow blank** (less than about one and a half text heights) merges the entry into the
+  printed words, and the field comes back missing.
+
 ### The included files
 
 These are ordinary YAML files. Edit them, copy them, or replace them with your own.
@@ -584,7 +615,8 @@ These are ordinary YAML files. Edit them, copy them, or replace them with your o
 |---|---|
 | `national_id` | `id_number`, `serial_number`, `full_name`, `date_of_birth`, `sex`, `nationality`, `place_of_birth`, `place_of_issue`, `date_of_issue`, `date_of_expiry` |
 | `driving_license` | `license_number`, `surname`, `other_names`, `national_id_number`, `date_of_birth`, `sex`, `blood_group`, `date_of_issue`, `date_of_expiry`, `vehicle_classes`, `country` |
-| `logbook` | `registration_number`, `chassis_number`, `engine_number`, `make`, `model`, `body_type`, `colour`, `fuel`, `year_of_manufacture`, `engine_capacity`, `passengers`, `tare_weight`, `gross_weight`, `owner_name`, `owner_pin`, `date_of_registration`, `logbook_number`, `previous_registration` |
+| `logbook` | `registration_number`, `chassis_number`, `engine_number`, `make`, `model`, `body_type`, `colour`, `fuel`, `year_of_manufacture`, `engine_capacity`, `passengers`, `tare_weight`, `gross_weight`, `owner_name`, `owner_pin`, `date_of_registration`, `logbook_number`, `previous_registration`, `vehicle_type`, `tax_class`, `axles`, `load_capacity`, `previous_registration_country`, `duty`, `previous_owners`, `owner_box`, `owner_postal_code`, `owner_town`, `transfer_number`, `certificate_serial` |
+| `birth_certificate` | `certificate_number`, `district`, `province`, `entry_number`, `where_born`, `name`, `date_of_birth`, `sex`, `father_name`, `mother_name`, `informant`, `registering_officer`, `date_of_registration` |
 | `passport` | `passport_number`, `surname`, `given_names`, `nationality`, `date_of_birth`, `sex`, `place_of_birth`, `date_of_issue`, `date_of_expiry`, `country_code`, `issuing_authority` |
 
 ### Asking for a field that is not in the YAML
@@ -655,9 +687,17 @@ What has been measured:
   short label matching inside a title, unparseable numbers returned as text) are fixed. The one
   remaining silent error is an OCR misreading (`Bancshares` read as `Baneshares`) inside a
   correctly found value.
+- **One Kenyan birth certificate photo** (a ruled form under a reflective cover): 12 of 13 fields
+  read correctly, and the thirteenth, a struck-out entry, correctly reported missing. Before
+  stacked labels and fill-in lines were supported it was 3 of 13 with one wrong value.
+- **One Kenyan vehicle registration certificate (logbook), from a phone screenshot:** all 26
+  filled-in fields read correctly and the 4 blank ones reported missing. With the logbook file as
+  first written, before it was corrected against this real certificate, three fields were wrong
+  with no warning; the wording of a real form matters more than anything else.
 - **One Kenyan national ID photo:** all eight printed fields read correctly, and the two fields
-  not on the card reported missing. No real logbooks, driving licences or passports, and no real
-  Kenyan agreements, have been tested.
+  not on the card reported missing. No real driving licences or passports, and no real Kenyan
+  agreements, have been tested; the driving licence and passport files are still unchecked guesses
+  at those documents' wording.
 
 Expect real documents with security backgrounds, glare, creases or steep camera angles to do worse
 than the synthetic figure. Measure on your own scans before relying on it.
@@ -673,7 +713,10 @@ What it does not do:
 - **OCR mistakes inside a value** of a scanned or photographed page: a dropped space
   (`JOSEPHINEWANJIRU`) or a misread letter (`Baneshares`), with high confidence and no warning.
   Digital PDFs read from their text do not have this problem.
-- **A label wrapped over two lines.**
+- **Some ruled-form layouts.** A label printed on two or three lines inside its cell (`Date of`
+  above `Birth`) is found: write the full wording on one line in the YAML. Not handled: a label
+  over more than three lines, a single word broken across two lines, and a two-line value sitting
+  level with both lines of a two-line label (it comes back missing, with a warning).
 - **Text the YAML does not mention.** A value can pick up neighbouring text that belongs to a
   label the YAML does not list. List that label under `other_labels` to stop it.
 - **Bilingual labels** such as `Surname / Nom`.
