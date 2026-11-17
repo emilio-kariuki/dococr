@@ -1,5 +1,6 @@
 """dococr: tell it the document type (or let it detect it) and the fields you want; get them back as JSON."""
 
+from dococr.batching import BatchItem, batch, find_documents
 from dococr.detection import UnknownDocumentError
 from dococr.doctypes import DocTypeError, list_doc_types, load_doc_type
 from dococr.extractors.base import Extractor, ExtractorError
@@ -19,6 +20,7 @@ from dococr.models import (
 from dococr.pipeline import detect, extract, get_extractor, warm_up
 
 __all__ = [
+    "BatchItem",
     "Detection",
     "DetectionCandidate",
     "DocType",
@@ -35,8 +37,10 @@ __all__ = [
     "SourceError",
     "UnknownDocumentError",
     "ValuePart",
+    "batch",
     "detect",
     "extract",
+    "find_documents",
     "get_extractor",
     "list_doc_types",
     "load_doc_type",

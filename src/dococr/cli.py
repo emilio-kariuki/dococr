@@ -10,7 +10,8 @@ from typing import Optional
 
 import typer
 
-from dococr import pipeline
+from dococr import batchio, pipeline
+from dococr.batching import DEFAULT_TIMEOUT, batch as run_batch, default_workers, find_documents, result_fields
 from dococr.detection import UnknownDocumentError, is_auto
 from dococr.doctypes import find_doc_types, load_doc_type, load_doc_type_file
 from dococr.extractors.base import ExtractorError
@@ -181,6 +182,116 @@ def extract(
         return
     payload = [r.model_dump(mode="json") for r in results]
     typer.echo(json.dumps(payload[0] if len(payload) == 1 else payload, indent=2, ensure_ascii=False))
+
+
+EXIT_SOME_FAILED = 3  # `batch`: it finished, but at least one document has no result
+
+
+class BatchFormat(str, Enum):
+    csv = "csv"
+    jsonl = "jsonl"
+    json = "json"
+
+
+@app.command("batch")
+def batch_(
+    inputs: list[Path] = typer.Argument(..., help="Files and/or folders to read. A PDF or multi-page TIFF is one document."),
+    output: Path = typer.Option(..., "--output", "-o", help="The file to write: .csv, .jsonl or .json."),
+    output_format: Optional[BatchFormat] = typer.Option(
+        None, "--format", help="csv, jsonl or json. Default: from the extension of --output. "
+        "Use jsonl for large runs (written as each document finishes); json is one array written "
+        "at the end, for small batches."),
+    recursive: bool = typer.Option(False, "--recursive", "-r", help="Also read the subfolders of the folders given."),
+    doc_type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Document type name or YAML file. Omitted or 'auto': detect it per document."),
+    fields: Optional[str] = typer.Option(None, "--fields", "-f", help="Comma-separated field names. Default: all fields of the type."),
+    types_dir: Optional[list[Path]] = _TYPES_DIR,
+    candidates: Optional[str] = _CANDIDATES,
+    max_pages: int = typer.Option(DEFAULT_MAX_PAGES, "--max-pages", min=1, help="Refuse a document with more pages than this."),
+    pdf_text: PdfText = typer.Option(PdfText.auto, "--pdf-text", help="auto, always or never (see extract)."),
+    workers: Optional[int] = typer.Option(
+        None, "--workers", "-w", min=0,
+        help="Worker processes, each with its own copy of the models (about 0.7 GB; more for a very "
+        "large page). Default: 2 on a machine with 4 or more CPUs and the memory, else 1 "
+        "(DOCOCR_BATCH_WORKERS overrides). 0 reads in this process, without crash isolation."),
+    ocr_threads: Optional[int] = typer.Option(
+        None, "--ocr-threads", min=1, help="OCR threads per worker (default: DOCOCR_OCR_THREADS if set, else 2 with several workers, 4 with one)."),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT, "--timeout", min=0, help="Seconds one document may take before its worker is stopped "
+        "and the document recorded as timeout. 0: no limit. Not applied with --workers 0."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Replace --output if it exists."),
+    resume: bool = typer.Option(
+        False, "--resume", help="Add to an existing .jsonl or .csv --output, skipping the documents "
+        "already recorded in it (same path, size and modification time)."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="No progress line (the summary is still printed)."),
+) -> None:
+    """Read many documents, loading the OCR models once per worker, into one CSV, JSON Lines or JSON file.
+
+    A document that cannot be read is a row with a status and an error; the batch goes on.
+    Exit status: 0 every document read, 3 finished with some failed, 1 the batch could not run,
+    130 interrupted. Progress and the summary go to stderr and never show extracted values."""
+    names = _names(fields)
+    try:
+        fmt = batchio.infer_format(output, output_format.value if output_format else None)
+        files = find_documents(inputs, recursive=recursive)
+        if not files:
+            raise ValueError("no documents found (folders are searched for image and PDF files; "
+                             "add --recursive for subfolders)")
+        kind = doc_type if doc_type and not is_auto(doc_type) else "auto"
+        columns = result_fields(kind, names, candidates=_names(candidates), dirs=types_dir)
+        writer, done = batchio.open_writer(output, fmt, columns, overwrite=overwrite, resume=resume)
+    except (ValueError, OSError) as exc:  # includes DocTypeError, OutputError, FileNotFoundError
+        raise _fail(str(exc))
+    skipped = 0
+    if done:
+        todo = []
+        for path in files:
+            try:
+                st = path.stat()
+            except OSError:
+                todo.append(path)
+                continue
+            if (str(path), st.st_size, st.st_mtime_ns) in done:
+                skipped += 1
+            else:
+                todo.append(path)
+        files = todo
+    if writer.skipped_partial:
+        typer.echo("note: the output ended in an incomplete record; it was dropped", err=True)
+    count = default_workers() if workers is None else workers
+    progress = batchio.Progress(len(files), enabled=not quiet)
+    complete, interrupted, problem = False, False, ""
+    stream = None
+    try:
+        stream = run_batch(
+            files, kind, names, workers=count, ocr_threads=ocr_threads, timeout=timeout or None,
+            max_pages=max_pages, pdf_text=pdf_text.value, candidates=_names(candidates), dirs=types_dir)
+        for item in stream:
+            writer.write(batchio.record(item))
+            progress.update(item)
+        complete = True
+    except KeyboardInterrupt:
+        interrupted = True
+    except (ExtractorError, ValueError, OSError) as exc:
+        problem = str(exc)
+    finally:
+        if stream is not None and hasattr(stream, "close"):
+            stream.close()
+        progress.finish()
+        try:
+            writer.close(complete)
+        except (ValueError, OSError) as exc:
+            problem = problem or str(exc)
+            complete = False
+    typer.echo(progress.summary(skipped=skipped, output=output, fmt=fmt, interrupted=interrupted), err=True)
+    if problem:
+        raise _fail(problem)
+    if interrupted:
+        if fmt == "json":
+            typer.echo("note: nothing was written; use .jsonl for runs that may be interrupted", err=True)
+        raise typer.Exit(code=130)
+    if progress.failed:
+        raise typer.Exit(code=EXIT_SOME_FAILED)
 
 
 @app.command()
