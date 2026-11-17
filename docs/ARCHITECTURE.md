@@ -578,6 +578,7 @@ Found by attacking a running service; each has a regression test in `tests/test_
 | 20,000 characters per PDF page, else the page is OCR'd | `pdftext.MAX_PAGE_CHARS` | A 376 KB page of microscopic text cost 21 s in the matcher. |
 | 2,000 characters for a `date`, `integer` or `number` value | `normalize.MAX_TYPED_LENGTH` | 65,000 characters of glued number words took 4.5 s to parse. |
 | No unbounded repeat inside an unbounded repeat in `pattern` | `models._nested_unbounded_repeat` | `(a+)+$` did not finish on 31 characters. |
+| 600 s per document in a batch, worker killed and replaced | `batching` | A document that hangs the engine would otherwise stall the batch. Worst-case memory is about `workers × 2.3 GB`. |
 | 50 candidate types per detection (`DOCOCR_MAX_CANDIDATES`) | `detection` | A folder of thousands of YAML files would otherwise make every request slow. |
 | 2 extractions at once (`DOCOCR_MAX_CONCURRENT`), 30 s wait, then 503 | `api._extract_slots` | Each extraction holds decoded pages; the thread pool would otherwise run 40. |
 | 100 connections, 10 s shutdown deadline | `cli.serve` (uvicorn) | Idle connections were unbounded, and a running extraction blocked shutdown. |
@@ -835,6 +836,29 @@ agreement detected as its own family once its YAML was a candidate.
 on one phrase, so an OCR misreading of exactly that phrase could mislead it; a partial page of a
 type with a long YAML may score too low; adding a candidate changes the others' weights.
 "Republic of Kenya" is deliberately listed on every shipped type so that it carries no weight.
+
+## Batch processing (`batching.py`, `batchio.py`)
+
+- **Workers** are `spawn` processes, each loading the models once and taking one document at a
+  time over its own pipe. The pool is written by hand because `ProcessPoolExecutor` breaks the
+  whole pool when one child dies; here a dead worker's document is recorded as `crashed` and a
+  replacement starts. A document over `--timeout` (600 s) has its worker killed and replaced.
+  Three consecutive deaths while loading the models stop the batch.
+- **Order.** Results are written in input order through a reorder buffer that reads at most
+  `max(8, 4 × workers)` documents ahead; that many finished documents can be lost on an
+  interruption and are read again on resume.
+- **Outputs.** JSON Lines and CSV are streamed and created exclusively; the CSV columns are known
+  before the first document (the named type's fields, or the union of the candidates'). JSON is
+  written to a temporary file and renamed into place. CSV cells starting with `= + - @`, tab or
+  carriage return get a leading apostrophe.
+- **Resume** matches absolute path, size and modification time; an incomplete last record is cut
+  off; failed documents count as recorded.
+- **Measured** at load 60 to 130 on 12 CPUs, 24 synthetic pages: one process 0.31 to 0.38
+  documents a second; 2 workers × 2 threads 0.46 to 0.50 (the default); 4 × 2 0.51 to 0.60; 4
+  threads per worker gained nothing from more workers. 24 separate `dococr extract` runs took 167
+  to 181 s against 49 to 53 s for the batch. Peak memory 0.65 to 0.96 GB per worker on ordinary
+  pages and 1.68 GB on a 63-megapixel page.
+- Neither module holds document knowledge.
 
 ## Possible next steps
 

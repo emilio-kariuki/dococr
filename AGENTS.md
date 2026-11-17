@@ -205,6 +205,9 @@ change to `ocr/` or `preprocess.py`; a speed-up that loses fields is not accepte
 - **The first detection is reused for recognition.** A change to how the page is warped must keep
   `PageTransform.line_quads` correct, or lines are cropped from the wrong place. The tests in
   `tests/local/test_single_pass.py` cover turned and skewed pages.
+- **Batch workers are `spawn` processes.** Anything passed to them (an `extractor_factory`) must
+  be picklable, and a script that calls `dococr.batch` needs an `if __name__ == "__main__":`
+  guard. Never log extracted values from the batch progress or summary.
 - **`_UploadGuard` changes a Starlette class attribute**, so it affects every multipart parse in
   the process.
 

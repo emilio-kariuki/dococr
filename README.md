@@ -73,6 +73,7 @@ installing it into a clean environment and running it with no network interfaces
 ```bash
 dococr extract photo.jpg                  # work out the document type, then extract every field
 dococr detect photo.jpg                   # only say which type it is, with the evidence
+dococr batch scans/ -o results.csv        # a whole folder, models loaded once; see "Batch processing"
 dococr types                              # every document type it can find
 dococr fields logbook                     # a type's fields, their kind, and the labels they match
 dococr extract photo.jpg --type logbook --fields registration_number,owner_name
@@ -260,6 +261,65 @@ page as an image. When no page needs OCR, the OCR engine is not even loaded.
 
 A text layer whose letters are mapped to the wrong characters without any error mark cannot be
 detected without OCR; it would be trusted.
+
+## Batch processing
+
+Process a folder, or a list of files, into one output file. The models load once per worker, so
+a backlog runs about three and a half times faster than calling `dococr extract` per file.
+
+```bash
+dococr batch scans/ -o results.csv                 # detect each document's type, one row each
+dococr batch scans/ -o results.jsonl -r            # include subfolders; JSON Lines output
+dococr batch a.pdf b.jpg -o out.json -t logbook    # named files, a known type
+dococr batch scans/ -o results.jsonl --resume      # carry on after an interruption
+```
+
+```python
+from dococr import batch
+
+for item in batch(["scans/"], doc_type="auto"):
+    if item.ok:
+        print(item.source, item.result.values())
+    else:
+        print(item.source, item.status, item.error)
+```
+
+**Output formats**, chosen from the file extension (or `--format`):
+
+| Format | What you get | Use it for |
+|---|---|---|
+| `.jsonl` | One full result per line, written as each document finishes | Large runs: an interruption loses at most a few documents, and `--resume` carries on |
+| `.csv` | One row per document: `file, status, error, doc_type, detection_score, pages, missing_fields, elapsed_ms, size_bytes, mtime_ns`, then `<field>`, `<field>_confidence`, `<field>_warnings` for each field | Spreadsheets. With auto detection the columns are every candidate type's fields |
+| `.json` | One array, written at the end | Small batches only: it is held in memory and nothing is written if the run is interrupted |
+
+**One bad file never stops the batch.** Each document gets a `status`: `ok`, `unknown_type` (no
+document type fitted), `bad_input` (unreadable, damaged or over a limit), `engine_error`,
+`crashed` (the OCR engine died on it; a fresh worker carries on), `timeout` (over `--timeout`,
+default 600 s), or `error`. Failures are listed on the screen as they happen, without any
+extracted values.
+
+**Exit status:** 0 when every document was read, 3 when the batch finished but some documents
+have no result, 1 when the batch could not run, 130 when interrupted.
+
+**Files picked up from a folder:** images and PDFs only, sorted by name; hidden files and folders
+are skipped; subfolders only with `-r`; symlinked folders are not followed. Files you name
+explicitly are always taken.
+
+**Safety:**
+
+- An existing output file is never replaced unless you pass `--overwrite`.
+- `--resume` skips documents already recorded, matching path, size and modification time, so a
+  changed file is read again.
+- **Formula injection:** a document could contain text such as `=HYPERLINK(...)` that a
+  spreadsheet would run. In CSV output, any text starting with `=`, `+`, `-`, `@`, a tab or a
+  carriage return gets a leading apostrophe. Numbers and JSON output are left as they are.
+
+**Workers and memory.** The default is 2 worker processes with 2 OCR threads each, which was about
+40% faster than one process on the test machine; it drops to 1 on a machine with under 4 CPUs or
+little free memory. Each worker uses about 0.7 to 1 GB, and up to about 2.3 GB on the largest page
+allowed, so set `--workers` (or `DOCOCR_BATCH_WORKERS`) with your memory in mind. On a busy
+12-CPU machine, 4 workers of 2 threads each was the fastest setting measured, about 1.7 times one
+process.
 
 ## HTTP service
 
